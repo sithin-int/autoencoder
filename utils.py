@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import numpy as np
+from sklearn.manifold import TSNE
+
 # Autoencoder Architecture
 
 class FC_Block(nn.Module):
@@ -141,3 +144,29 @@ class Model:
         self.net.load_state_dict(best_model_wts)
         
         return self.net.cpu()
+
+
+# other useful utility functions
+
+def norm_anomaly_split(X, y):
+    
+    normal_indeces = np.argwhere(y==0).ravel()
+    anomaly_indeces = np.argwhere(y==1).ravel()
+    
+    X_norm = X[normal_indeces]
+    X_anomaly = X[anomaly_indeces]
+
+    return X_norm, X_anomaly
+
+def visualize_using_tsne(X, y, n_components=2):
+    
+    X_transformed = TSNE(n_components = n_components, random_state=0).fit_transform(X)
+    
+    plt.scatter(*zip(*X_transformed[y==1]), marker='o', color='r', s=10, label='Anomalous')
+    plt.scatter(*zip(*X_transformed[y==0]), marker='o', color='g', s=10, label='Normal')
+    plt.legend()
+    plt.show()
+    
+    
+    
+    
