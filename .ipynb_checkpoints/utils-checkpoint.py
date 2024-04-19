@@ -2,8 +2,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.manifold import TSNE
+
+import time as time
+import copy as copy
+
 
 # Autoencoder Architecture
 
@@ -40,6 +45,49 @@ class Autoencoder(nn.Module):
         
         decoder_layers = list(reversed(encoder_layers))
         self.decoder_block = FC_Block(latent_dim, decoder_layers, activation_fn)
+        self.scores = nn.Linear(decoder_layers[-1], input_dim)
+    
+    def forward(self, x):
+        
+        x = self.encoder_block(x)
+        h = x = self.embedding_layer(x)
+        x = self.decoder_block(x)
+        x = self.scores(x)
+        
+        return x, h
+
+
+class bayesian_FC_Block(nn.Module):
+    
+    def __init__(self, in_feats, hidden_layers, activation_fn = nn.LeakyReLU(), dropout_prob=0.5):
+        
+        super(bayesian_FC_Block, self).__init__()
+        
+        layers = []
+        
+        for out_feats in hidden_layers:
+            layers += [nn.Linear(in_feats, out_feats), activation_fn, nn.Dropout(p=dropout_prob)]
+            in_feats = out_feats
+            
+        self.block = nn.Sequential(*layers)
+        
+    def forward(self, x):
+        
+        x = self.block(x)
+        
+        return x
+
+
+class bayesianAutoencoder(nn.Module):
+    
+    def __init__(self, input_dim, encoder_layers=[100,50,25], latent_dim=5, activation_fn = nn.LeakyReLU(), dropout_prob=0.5):
+        
+        super(bayesianAutoencoder, self).__init__()
+        
+        self.encoder_block = bayesian_FC_Block(input_dim, encoder_layers, activation_fn, dropout_prob)
+        self.embedding_layer = nn.Sequential(*[nn.Linear(encoder_layers[-1], latent_dim), activation_fn, nn.Dropout(p=dropout_prob)])
+        decoder_layers = list(reversed(encoder_layers))
+        self.decoder_block = bayesian_FC_Block(latent_dim, decoder_layers, activation_fn, dropout_prob)
         self.scores = nn.Linear(decoder_layers[-1], input_dim)
     
     def forward(self, x):
@@ -144,6 +192,18 @@ class Model:
         self.net.load_state_dict(best_model_wts)
         
         return self.net.cpu()
+
+# dataset definition
+class Dataset(torch.utils.data.Dataset):
+    
+    def __init__(self, X):
+        self.X = X
+        
+    def __len__(self):
+        return len(self.X)
+    
+    def __getitem__(self, i):
+        return self.X[i], self.X[i]
 
 
 # other useful utility functions
