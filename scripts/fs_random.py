@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 
 MASK_FEATS = ["id", "label"]
-XL_PATH = os.path.join("..", r"inputs/radiomicsFeatures.csv")
+XL_PATH = os.path.join("..", r"radiomicsFeatures/radiomicsFeatures3D.csv")
 OUT_DIR = r"outputs/random"
 
 NUM_REPEATS = 100

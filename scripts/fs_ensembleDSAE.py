@@ -24,7 +24,7 @@ from utils import similarity_index
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
-XL_PATH = os.path.join("..", r"inputs/radiomicsFeatures.csv")
+XL_PATH = os.path.join("..", r"radiomicsFeatures/radiomicsFeatures3D.csv")
 OUT_DIR = r"outputs/ensembleDSAE"
 MASK_FEATS = ["id", "label"]
 
