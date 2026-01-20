@@ -17,7 +17,7 @@ import os
 
 from tqdm import tqdm
 
-XL_PATH = os.path.join("..", r"radiomicsFeatures/radiomicsFeatures3D.csv")
+XL_PATH = os.path.join("..", r"radiomicsFeatures/radiomicsFeaturesWithLabels.csv")
 OUT_DIR = r"outputs/backwardSFS"
 MASK_FEATS = ["id", "label"]
 
