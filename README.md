@@ -37,6 +37,7 @@ autoencoder
 │    └── fs_bayesianDSAE.ipynb              #----notebook for bayesianAE feature selection pipeline
 │    └── fs_ensembleDSAE.ipynb              #----notebook for ensembleAE feature selection pipeline
 │    └── stability_analysis.ipynb           #----notebook for stability analysis, complexity analysis, and visualization
+│    └── sanity_check.ipynb                 #----sanity checks for AE pipeline
 ├── README.md
 
 ```
