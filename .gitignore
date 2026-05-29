@@ -1,13 +1,9 @@
-# Ignore everything
-*
-# Re-include all directories (this preserves folder structure)
-!*/
-
-# Re-include all .py files
-!*.py
-!*.gitignore
-
-# Exclude archive folder
-archive
+/archive
+/inputs
+/.*
+/**/.*
+/**/figures
+/**/outputs
+/**/*.tif
 
 
