@@ -1,9 +1,8 @@
-/archive
-/inputs
+archive
+inputs
+outputs
 /.*
 /**/.*
-/**/figures
-/**/outputs
 /**/*.tif
 
 
