@@ -1,9 +1,13 @@
-/__pycache__
-/archive
-/dataset
-/inputs
-/.*
-/**/.*
-/**/figures
-/**/outputs
-/**/*.tif
+# Ignore everything
+*
+# Re-include all directories (this preserves folder structure)
+!*/
+
+# Re-include all .py files
+!*.py
+!*.gitignore
+
+# Exclude archive folder
+archive
+
+
