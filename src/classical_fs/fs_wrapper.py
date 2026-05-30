@@ -17,9 +17,14 @@ import gc
 import time
 import tracemalloc
 
-XL_PATH = "inputs/radiomicsFeaturesWithLabels.csv"
-PERTURBATIONS_FILE = "outputs/data_perturbations.npy"
-OUT_DIR = "outputs"
+ROOT_FOLDER_NAME = "autoencoder"
+dirs = os.getcwd().split("/")
+index = dirs.index(ROOT_FOLDER_NAME)
+ROOT_DIR = "/".join(dirs[:index + 1])
+
+XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
+PERTURBATIONS_FILE = os.path.join(ROOT_DIR, "outputs", "data_perturbations.npy")
+OUT_DIR = os.path.join(ROOT_DIR, "outputs")
 
 NON_FEATURE_COLS = ["id", "label"]
 LABEL = "label"

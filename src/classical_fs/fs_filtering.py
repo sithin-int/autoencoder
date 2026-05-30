@@ -18,9 +18,14 @@ import gc
 import time
 import tracemalloc
 
-XL_PATH = "inputs/radiomicsFeaturesWithLabels.csv"
-PERTURBATIONS_FILE = "outputs/data_perturbations.npy"
-OUT_DIR = "outputs"
+ROOT_FOLDER_NAME = "autoencoder"
+dirs = os.getcwd().split("/")
+index = dirs.index(ROOT_FOLDER_NAME)
+ROOT_DIR = "/".join(dirs[:index + 1])
+
+XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
+PERTURBATIONS_FILE = os.path.join(ROOT_DIR, "outputs", "data_perturbations.npy")
+OUT_DIR = os.path.join(ROOT_DIR, "outputs")
 
 NON_FEATURE_COLS = ["id", "label"]
 LABEL = "label"
@@ -61,6 +66,7 @@ def filter_fs(df, fs_method):
     X = X_df.to_numpy()
     y = y_df.to_numpy().ravel()
 
+    is_ascending = True
     scores = []
     if fs_method.__name__=="mannwhitneyu":
         for i in range(len(features)):
@@ -72,17 +78,14 @@ def filter_fs(df, fs_method):
         scores = [feature_to_score[feat] for feat in features]
     elif fs_method.__name__=="mutual_info_classif":
         scores = fs_method(X, y, random_state=42, n_jobs=1)
+        is_ascending = False
     
     rank_dict = {"feature":features, "score":scores}
     rank_df = pd.DataFrame(rank_dict)
-    rank_df.sort_values("score", ascending=True if fs_method.__name__!="mutual_info_classif" else False, inplace=True)
+    rank_df["rank"] = rank_df["score"].rank(method="min", ascending=is_ascending).astype(int)
+    rank_df.sort_values("rank", inplace=True)
     rank_df.reset_index(drop=True, inplace=True)
-    rank_df["rank"] = rank_df.index + 1
 
-    zero_score_mask = rank_df.score==0
-    if zero_score_mask.any():
-        rank_df.loc[zero_score_mask, "rank"] = rank_df[zero_score_mask]["rank"].min()
-    
     rank_dict = rank_df.to_dict(orient="list")
 
     return rank_dict
@@ -133,6 +136,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-#%%
-print('hi')

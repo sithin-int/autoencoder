@@ -12,9 +12,14 @@ import gc
 import time
 import tracemalloc
 
-XL_PATH = "inputs/radiomicsFeaturesWithLabels.csv"
-PERTURBATIONS_FILE = "outputs/data_perturbations.npy"
-OUT_DIR = "outputs"
+ROOT_FOLDER_NAME = "autoencoder"
+dirs = os.getcwd().split("/")
+index = dirs.index(ROOT_FOLDER_NAME)
+ROOT_DIR = "/".join(dirs[:index + 1])
+
+XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
+PERTURBATIONS_FILE = os.path.join(ROOT_DIR, "outputs", "data_perturbations.npy")
+OUT_DIR = os.path.join(ROOT_DIR, "outputs")
 
 NON_FEATURE_COLS = ["id", "label"]
 LABEL = "label"
@@ -59,14 +64,11 @@ def lasso_fs(X_df, y_df, cv=5):
 
     rank_dict = {"feature":features, "absolute_coef":np.abs(estimator[-1].coef_[0])}
     rank_df = pd.DataFrame(rank_dict)
-    rank_df.sort_values("absolute_coef", ascending=False, inplace=True)
+    
+    rank_df["rank"] = rank_df["absolute_coef"].rank(method="min", ascending=False).astype(int)
+    rank_df.sort_values("rank", inplace=True)
     rank_df.reset_index(drop=True, inplace=True)
-    rank_df["rank"] = rank_df.index + 1
-    
-    zero_coef_mask = rank_df.absolute_coef==0
-    if zero_coef_mask.any():
-        rank_df.loc[zero_coef_mask, "rank"] = rank_df[zero_coef_mask]["rank"].min()
-    
+
     rank_dict = rank_df.to_dict(orient="list")
 
     return rank_dict
