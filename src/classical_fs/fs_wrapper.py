@@ -1,3 +1,4 @@
+#%%
 from sklearn.feature_selection import SequentialFeatureSelector as SFS
 from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier
@@ -18,9 +19,9 @@ import time
 import tracemalloc
 
 ROOT_FOLDER_NAME = "autoencoder"
-dirs = os.getcwd().split("/")
+dirs = os.getcwd().split(os.path.sep)
 index = dirs.index(ROOT_FOLDER_NAME)
-ROOT_DIR = "/".join(dirs[:index + 1])
+ROOT_DIR = os.path.sep.join(dirs[:index + 1])
 
 XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
 PERTURBATIONS_FILE = os.path.join(ROOT_DIR, "outputs", "data_perturbations.npy")
@@ -78,7 +79,7 @@ def iterative_bsfs(df, estimator):
     rank_dict = {"feature":[], "rank":[]}
 
     elapsed_timex, peak_memx = [], []
-    for k in tqdm(range(len(remaining), 1, -1), desc="running iterative bsfs", position=0):
+    for k in tqdm(range(len(remaining), 1, -1), desc=f"running iterative bsfs ({estimator[-1].__class__.__name__})", position=0):
         
         X_df = df[remaining]
         y_df = df[LABEL]
@@ -97,16 +98,16 @@ def iterative_bsfs(df, estimator):
     rank_dict["rank"].append(1)
     
     tot_elapsed_time = np.sum(elapsed_timex)
-    tot_peak_mem = np.sum(peak_memx)
+    peak_mem = np.max(peak_memx)
 
-    return rank_dict, tot_elapsed_time, tot_peak_mem
+    return rank_dict, tot_elapsed_time, peak_mem
 
 
 def main():
 
     estimators = [
         make_pipeline(StandardScaler(), LogisticRegression(C=np.inf, max_iter=10_000, random_state=42)), #no penalty
-        make_pipeline(StandardScaler(), SVC(kernel="linear", max_iter=10_000, random_state=42, probability=True)),
+        make_pipeline(StandardScaler(), SVC(kernel="linear", max_iter=10_000, random_state=42, probability=False)),
         make_pipeline(StandardScaler(), RandomForestClassifier(n_jobs=1, random_state=42)),
         make_pipeline(StandardScaler(), MLPClassifier(max_iter=10_000, random_state=42))
     ]
@@ -119,13 +120,13 @@ def main():
 
         for perturb_id in tqdm(perturbations, position=0, desc=f"Running soft data-perturbations on {estimator[-1].__class__.__name__}"):
 
-            train_pids, train_labels = perturbations[perturb_id]["train"]
-            test_pids, test_labels = perturbations[perturb_id]["val"]
+            train_pids = perturbations[perturb_id]["train"]
+            test_pids = perturbations[perturb_id]["val"]
 
             train_df = radiomics_df[radiomics_df.id.isin(train_pids)]
             val_df = radiomics_df[radiomics_df.id.isin(test_pids)]
 
-            rank_dict, tot_elapsed_time, tot_peak_mem = iterative_bsfs(train_df, estimator)
+            rank_dict, tot_elapsed_time, peak_mem = iterative_bsfs(train_df, estimator)
 
             rank_df = pd.DataFrame(rank_dict)
             rank_df.sort_values("rank", inplace=True)
@@ -149,7 +150,8 @@ def main():
             os.makedirs(outdir, exist_ok=True)
         
             out_path = os.path.join(outdir, f"{perturb_id}.npz")
-            np.savez_compressed(out_path, rank_dict=np.array(rank_dict, dtype=object), predictions=predictions, targets=targets, elapsed_time=tot_elapsed_time, peak_memory=tot_peak_mem)
+            np.savez_compressed(out_path, rank_dict=np.array(rank_dict, dtype=object), predictions=predictions, targets=targets, elapsed_time=tot_elapsed_time, peak_memory=peak_mem)
 
+            break;
 if __name__ == "__main__":
     main()

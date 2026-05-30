@@ -1,5 +1,3 @@
-#%%
-
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -19,9 +17,9 @@ import time
 import tracemalloc
 
 ROOT_FOLDER_NAME = "autoencoder"
-dirs = os.getcwd().split("/")
+dirs = os.getcwd().split(os.path.sep)
 index = dirs.index(ROOT_FOLDER_NAME)
-ROOT_DIR = "/".join(dirs[:index + 1])
+ROOT_DIR = os.path.sep.join(dirs[:index + 1])
 
 XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
 PERTURBATIONS_FILE = os.path.join(ROOT_DIR, "outputs", "data_perturbations.npy")
@@ -102,8 +100,8 @@ def main():
     for fs_method in fs_methods:
         for perturb_id in tqdm(perturbations, desc=f"Running soft data-perturbation on {fs_method.__name__}", position=0):
             
-            train_pids, train_labels = perturbations[perturb_id]["train"]
-            test_pids, test_labels = perturbations[perturb_id]["val"]
+            train_pids = perturbations[perturb_id]["train"]
+            test_pids = perturbations[perturb_id]["val"]
 
             train_df = radiomics_df[radiomics_df.id.isin(train_pids)]
             val_df = radiomics_df[radiomics_df.id.isin(test_pids)]
@@ -136,3 +134,24 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# # sanity check
+# import numpy as np
+# import os
+# from sklearn.metrics import roc_auc_score
+
+# root_dir = "/Users/sithin/research/phd/autoencoder"
+
+# fs_method = "filtering/mutual_info_classif"
+# _ = np.load(os.path.join(root_dir, "outputs", fs_method, "0.npz"), allow_pickle=True)
+
+
+
+# rank_df = pd.DataFrame(_["rank_dict"].item())
+# predictions = _["predictions"]
+# targets = _["targets"]
+
+# print(roc_auc_score(targets, predictions))
+# display(rank_df.head())
+# display(rank_df.tail())

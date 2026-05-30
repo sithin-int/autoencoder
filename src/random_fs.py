@@ -1,5 +1,3 @@
-#%%
-
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -28,7 +26,6 @@ LABEL = "label"
 
 NUM_FEATS_TO_SELECT = 5
 
-
 def profile_time_and_memory(func):
 
     @wraps(func)
@@ -52,22 +49,20 @@ def profile_time_and_memory(func):
     
     return wrapper
 
+### Feature Selection Pipeline
 @profile_time_and_memory
-def lasso_fs(X_df, y_df):
+def random_fs(df, random_state):
+    
+    features = [feat for feat in df.columns if feat not in NON_FEATURE_COLS]
+    
+    # Generate random ranks for all features
+    ranks = np.arange(len(features)) + 1
+    ranks = random_state.permutation(ranks).tolist()
 
-    estimator = make_pipeline(StandardScaler(), LogisticRegression(C=1.0, l1_ratio=1, solver="liblinear", max_iter=10_000, random_state=42))
-
-    features = X_df.columns.to_numpy()
-
-    X = X_df.to_numpy()
-    y = y_df.to_numpy().ravel()
-
-    estimator.fit(X, y)
-
-    rank_dict = {"feature":features, "absolute_coef":np.abs(estimator[-1].coef_[0])}
+    rank_dict = {"feature": features, "rank": ranks}
     rank_df = pd.DataFrame(rank_dict)
     
-    rank_df["rank"] = rank_df["absolute_coef"].rank(method="min", ascending=False).astype(int)
+    # Sort by rank and reset index to match Code 2's dictionary structure
     rank_df.sort_values("rank", inplace=True)
     rank_df.reset_index(drop=True, inplace=True)
 
@@ -76,13 +71,6 @@ def lasso_fs(X_df, y_df):
     return rank_dict
 
 
-def run_lasso(train_df):
-
-    features = [feat for feat in train_df.columns if feat not in NON_FEATURE_COLS]
-
-    rank_dict, elapsed_time, peak_mem = lasso_fs(train_df[features], train_df[LABEL])
-
-    return rank_dict, elapsed_time, peak_mem
 
 def main():
 
@@ -90,16 +78,18 @@ def main():
 
     perturbations = np.load(PERTURBATIONS_FILE, allow_pickle=True).item()
 
+    for perturb_id in tqdm(perturbations, desc="Running soft data-perturbation on Random FS", position=0):
+        
+        random_state = np.random.default_rng(seed=perturb_id) # although I called it random state its actually a random number generator
 
-    for perturb_id in tqdm(perturbations, desc="Running soft data-perturbation on LASSO", position=0):
-    
         train_pids = perturbations[perturb_id]["train"]
         test_pids = perturbations[perturb_id]["val"]
 
         train_df = radiomics_df[radiomics_df.id.isin(train_pids)]
         val_df = radiomics_df[radiomics_df.id.isin(test_pids)]
 
-        rank_dict, elapsed_time, peak_mem = run_lasso(train_df)
+        # 1. Feature Selection
+        rank_dict, elapsed_time, peak_mem = random_fs(train_df, random_state)
 
         rank_df = pd.DataFrame(rank_dict)
         rank_df.sort_values("rank", inplace=True)
@@ -113,37 +103,26 @@ def main():
         X_val = val_df[selected_feats]
         y_val = val_df[LABEL]
 
-        pred_model = make_pipeline(StandardScaler(), LogisticRegression(C=np.inf, max_iter=10_000, random_state = 42)) #no penalty
+        # 2. Predictive Modeling (Unpenalized Logistic Regression)
+        pred_model = make_pipeline(StandardScaler(), LogisticRegression(C=np.inf, max_iter=10_000, random_state=42))
         pred_model.fit(X_train, y_train)
     
-        predictions = pred_model.predict_proba(X_val)[:,1]
+        predictions = pred_model.predict_proba(X_val)[:, 1]
         targets = y_val.to_numpy().ravel()
 
-        outdir = os.path.join(OUT_DIR, "embedded", "LASSO")
+        # 3. Saving Outputs
+        outdir = os.path.join(OUT_DIR, "random")
         os.makedirs(outdir, exist_ok=True)
     
         out_path = os.path.join(outdir, f"{perturb_id}.npz")
-        np.savez_compressed(out_path, rank_dict=np.array(rank_dict, dtype=object), predictions=predictions, targets=targets, elapsed_time=elapsed_time, peak_memory=peak_mem)
+        np.savez_compressed(
+            out_path, 
+            rank_dict=np.array(rank_dict, dtype=object), 
+            predictions=predictions, 
+            targets=targets, 
+            elapsed_time=elapsed_time, 
+            peak_memory=peak_mem
+        )
 
 if __name__ == "__main__":
     main()
-
-# # sanity check
-# import numpy as np
-# import os
-# from sklearn.metrics import roc_auc_score
-
-# root_dir = "/Users/sithin/research/phd/autoencoder"
-
-# fs_method = "embedded/LASSO"
-# _ = np.load(os.path.join(root_dir, "outputs", fs_method, "0.npz"), allow_pickle=True)
-
-
-
-# rank_df = pd.DataFrame(_["rank_dict"].item())
-# predictions = _["predictions"]
-# targets = _["targets"]
-
-# print(roc_auc_score(targets, predictions))
-# display(rank_df.head())
-# display(rank_df.tail())
