@@ -80,8 +80,7 @@ def main():
 
     for perturb_id in tqdm(perturbations, desc="Running soft data-perturbation on Random FS", position=0):
         
-        random_state = np.random.default_rng(seed=perturb_id) # although I called it random state its actually a random number generator
-
+        
         train_pids = perturbations[perturb_id]["train"]
         test_pids = perturbations[perturb_id]["val"]
 
@@ -89,6 +88,7 @@ def main():
         val_df = radiomics_df[radiomics_df.id.isin(test_pids)]
 
         # 1. Feature Selection
+        random_state = np.random.default_rng(seed=perturb_id) # although I called it random state its actually a random number generator
         rank_dict, elapsed_time, peak_mem = random_fs(train_df, random_state)
 
         rank_df = pd.DataFrame(rank_dict)

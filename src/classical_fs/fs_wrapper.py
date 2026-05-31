@@ -97,10 +97,10 @@ def iterative_bsfs(df, estimator):
     rank_dict["feature"].append(remaining[0])
     rank_dict["rank"].append(1)
     
-    tot_elapsed_time = np.sum(elapsed_timex)
+    elapsed_time = np.sum(elapsed_timex)
     peak_mem = np.max(peak_memx)
 
-    return rank_dict, tot_elapsed_time, peak_mem
+    return rank_dict, elapsed_time, peak_mem
 
 
 def main():
@@ -126,7 +126,7 @@ def main():
             train_df = radiomics_df[radiomics_df.id.isin(train_pids)]
             val_df = radiomics_df[radiomics_df.id.isin(test_pids)]
 
-            rank_dict, tot_elapsed_time, peak_mem = iterative_bsfs(train_df, estimator)
+            rank_dict, elapsed_time, peak_mem = iterative_bsfs(train_df, estimator)
 
             rank_df = pd.DataFrame(rank_dict)
             rank_df.sort_values("rank", inplace=True)
@@ -150,8 +150,7 @@ def main():
             os.makedirs(outdir, exist_ok=True)
         
             out_path = os.path.join(outdir, f"{perturb_id}.npz")
-            np.savez_compressed(out_path, rank_dict=np.array(rank_dict, dtype=object), predictions=predictions, targets=targets, elapsed_time=tot_elapsed_time, peak_memory=peak_mem)
+            np.savez_compressed(out_path, rank_dict=np.array(rank_dict, dtype=object), predictions=predictions, targets=targets, elapsed_time=elapsed_time, peak_memory=peak_mem)
 
-            break;
 if __name__ == "__main__":
     main()
