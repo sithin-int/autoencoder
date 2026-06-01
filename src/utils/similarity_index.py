@@ -3,7 +3,7 @@ from scipy.optimize import linear_sum_assignment
 
 #un-ordered similarity metric
 
-def jaccard(df1, df2, k, **kwargs):
+def jaccard(df1, df2, k, feats_df = None):
 
     N = len(df1) # or len(df2)
 
@@ -17,7 +17,7 @@ def jaccard(df1, df2, k, **kwargs):
 
     return len(f1_k & f2_k)/len(f1_k | f2_k)
 
-def dice(df1, df2, k, **kwargs):
+def dice(df1, df2, k, feats_df = None):
 
     N = len(df1) # or len(df2)
 
@@ -31,7 +31,7 @@ def dice(df1, df2, k, **kwargs):
 
     return (2 * len(f1_k & f2_k))/(len(f1_k)+len(f2_k))
 
-def kuncheva(df1, df2, k, **kwargs):
+def kuncheva(df1, df2, k, feats_df = None):
 
     # for kuncheva index boundaries to work you have to make sure that features in df1 and df2 are the same
 
@@ -52,7 +52,7 @@ def kuncheva(df1, df2, k, **kwargs):
 
     return (r*N - (k**2))/(k * (N-k))
 
-def mwm(df1, df2, feats_df, k, **kwargs):
+def mwm(df1, df2, k, feats_df):
 
     assert set(["feature", "rank"]).issubset(df1.columns) and set(["feature", "rank"]).issubset(df2.columns), "missing columns - feature, rank"
 
@@ -72,7 +72,7 @@ def mwm(df1, df2, feats_df, k, **kwargs):
     
 # ordered similarity metric
 
-def global_spearman(df1, df2, **kwargs):
+def global_spearman(df1, df2, feats_df = None):
 
     assert set(["feature", "rank"]).issubset(df1.columns) and set(["feature", "rank"]).issubset(df2.columns), "missing columns - feature, rank"
 

@@ -185,13 +185,6 @@ def ensemble_dsae_fs(df, num_ensembles):
             deltas = (re_test1 - re_test0).cpu().numpy()
             ensemble_deltas.append(deltas)
 
-        del model, dsae, dls, train_ds, val_ds, X_train, y_train, X_test, y_test
-        if "cuda" in DEVICE.type:
-            torch.cuda.empty_cache()
-        elif "mps" in DEVICE.type:
-            torch.mps.empty_cache()
-        else:
-            pass
             
     # Calculate the mean score across the B trained models
     mean_deltas = np.mean(ensemble_deltas, axis=0)
@@ -257,7 +250,30 @@ def main():
             gpu_mem=gpu_mem
         )
 
+
+
 if __name__ == "__main__":
     main()
 
+# #%%
+# # sanity check
+# import numpy as np
+# import os
+# from sklearn.metrics import roc_auc_score
 
+# root_dir = "/Users/sithin/research/phd/autoencoder"
+
+# fs_method = "filtering/ensembleAE"
+# _ = np.load(os.path.join(root_dir, "outputs", fs_method, "0.npz"), allow_pickle=True)
+
+
+# print(_)
+
+# rank_df = pd.DataFrame(_["rank_dict"].item())
+# predictions = _["predictions"]
+# targets = _["targets"]
+
+# print(roc_auc_score(targets, predictions))
+# display(rank_df.head())
+# display(rank_df.tail())
+# print(_["elapsed_time"], _["peak_memory"]/2**20, _["cpu_mem"]/2**20, _["gpu_mem"]/2**20)
