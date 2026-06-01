@@ -179,10 +179,6 @@ def dsae_fs(df):
 
 
 def main():
-    if not os.path.exists(XL_PATH):
-        print(f"Error: Target data file not found at {XL_PATH}")
-        return
-
     radiomics_df = pd.read_csv(XL_PATH)
     perturbations = np.load(PERTURBATIONS_FILE, allow_pickle=True).item()
     
