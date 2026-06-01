@@ -2,10 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.manifold import TSNE
-
 import time as time
 import copy as copy
 
@@ -14,20 +11,20 @@ import copy as copy
 
 class FC_Block(nn.Module):
     
-    def __init__(self, in_feats, hidden_layers, activation_fn = nn.LeakyReLU()):
+    def __init__(self, input_dim, hidden_dims):
         
         super(FC_Block, self).__init__()
         
         layers = []
         
-        for out_feats in hidden_layers:
-            layers += [nn.Linear(in_feats, out_feats), activation_fn]
-            in_feats = out_feats
+        for output_dim in hidden_dims:
+            layers += [nn.Linear(input_dim, output_dim), nn.LeakyReLU()]
+            input_dim = output_dim
             
         self.block = nn.Sequential(*layers)
         
     def forward(self, x):
-        
+
         x = self.block(x)
         
         return x
@@ -35,39 +32,36 @@ class FC_Block(nn.Module):
 
 class Autoencoder(nn.Module):
     
-    def __init__(self, input_dim, encoder_layers=[100,50,25], latent_dim=5, activation_fn = nn.LeakyReLU()):
+    def __init__(self, input_dim, hidden_dims=[100,50,25], latent_dim=5):
         
         super(Autoencoder, self).__init__()
         
-        self.encoder_block = FC_Block(input_dim, encoder_layers, activation_fn)
-        
-        self.embedding_layer = nn.Sequential(*[nn.Linear(encoder_layers[-1], latent_dim), activation_fn])
-        
-        decoder_layers = list(reversed(encoder_layers))
-        self.decoder_block = FC_Block(latent_dim, decoder_layers, activation_fn)
-        self.scores = nn.Linear(decoder_layers[-1], input_dim)
+        self.encoder = FC_Block(input_dim, hidden_dims)
+        self.embedding = nn.Sequential(*[nn.Linear(hidden_dims[-1], latent_dim), nn.LeakyReLU()])
+        decoder_dims = list(reversed(hidden_dims))
+        self.decoder = FC_Block(latent_dim, decoder_dims)
+        self.output = nn.Linear(decoder_dims[-1], input_dim)
     
     def forward(self, x):
-        
-        x = self.encoder_block(x)
-        h = x = self.embedding_layer(x)
-        x = self.decoder_block(x)
-        x = self.scores(x)
+        x = self.encoder(x)
+        h = self.embedding(x)
+        x = self.decoder(h)
+        x = self.output(x)
         
         return x, h
 
 
 class bayesian_FC_Block(nn.Module):
     
-    def __init__(self, in_feats, hidden_layers, activation_fn = nn.LeakyReLU(), dropout_prob=0.5):
+    def __init__(self, input_dim, hidden_dims, dropout_prob=0.5):
         
         super(bayesian_FC_Block, self).__init__()
         
         layers = []
         
-        for out_feats in hidden_layers:
-            layers += [nn.Linear(in_feats, out_feats), activation_fn, nn.Dropout(p=dropout_prob)]
-            in_feats = out_feats
+        for output_dim in hidden_dims:
+            layers += [nn.Linear(input_dim, output_dim), nn.LeakyReLU(), nn.Dropout(p=dropout_prob)]
+            input_dim = output_dim
             
         self.block = nn.Sequential(*layers)
         
@@ -80,22 +74,22 @@ class bayesian_FC_Block(nn.Module):
 
 class bayesianAutoencoder(nn.Module):
     
-    def __init__(self, input_dim, encoder_layers=[100,50,25], latent_dim=5, activation_fn = nn.LeakyReLU(), dropout_prob=0.5):
+    def __init__(self, input_dim, hidden_dims=[100,50,25], latent_dim=5, dropout_prob=0.5):
         
         super(bayesianAutoencoder, self).__init__()
         
-        self.encoder_block = bayesian_FC_Block(input_dim, encoder_layers, activation_fn, dropout_prob)
-        self.embedding_layer = nn.Sequential(*[nn.Linear(encoder_layers[-1], latent_dim), activation_fn, nn.Dropout(p=dropout_prob)])
-        decoder_layers = list(reversed(encoder_layers))
-        self.decoder_block = bayesian_FC_Block(latent_dim, decoder_layers, activation_fn, dropout_prob)
-        self.scores = nn.Linear(decoder_layers[-1], input_dim)
+        self.encoder = bayesian_FC_Block(input_dim, hidden_dims, dropout_prob)
+        self.embedding = nn.Sequential(*[nn.Linear(hidden_dims[-1], latent_dim), nn.LeakyReLU(), nn.Dropout(p=dropout_prob)])
+        decoder_dims = list(reversed(hidden_dims))
+        self.decoder = bayesian_FC_Block(latent_dim, decoder_dims, dropout_prob)
+        self.output = nn.Linear(decoder_dims[-1], input_dim)
     
     def forward(self, x):
         
-        x = self.encoder_block(x)
-        h = x = self.embedding_layer(x)
-        x = self.decoder_block(x)
-        x = self.scores(x)
+        x = self.encoder(x)
+        h = self.embedding(x)
+        x = self.decoder(h)
+        x = self.output(x)
         
         return x, h
 
@@ -106,18 +100,18 @@ class Model:
     def __init__(self, net):
         self.net = net
         
-    def compile(self, lr, h_lambda, loss_fn, cuda_device_id=0):
+    def compile(self, lr, l1_lambda, loss_fn, device):
         
-        self.h_lambda = h_lambda
-        self.optimizer = torch.optim.Adam(self.net.parameters(), lr)
+        self.l1_lambda = l1_lambda
         self.loss_fn = loss_fn 
-        self.device = torch.device(f"cuda:{cuda_device_id}" if torch.cuda.is_available() else "cpu")
+        self.device = device
         
         self.net.to(self.device)
+        self.optimizer = torch.optim.Adam(self.net.parameters(), lr)
         
-    def prepare_minibatch(self, mini_batch):
+    def prepare_minibatch(self, minibatch):
         
-        inputs, targets = mini_batch
+        inputs, targets = minibatch
         
         return inputs.float().to(self.device), targets.float().to(self.device)
         
@@ -128,6 +122,8 @@ class Model:
         hist = {'train':{'loss':[]}, 'val':{'loss':[]}}
         
         best_loss = np.inf
+
+        best_model_wts = copy.deepcopy(self.net.state_dict())
         
         for epoch in range(num_epochs):
             
@@ -145,17 +141,17 @@ class Model:
                     
                 running_loss = 0.0
                 
-                for mini_batch in dls[phase]:
+                for minibatch in dls[phase]:
                     
                     self.optimizer.zero_grad()
                     
-                    inputs, targets = self.prepare_minibatch(mini_batch)
+                    inputs, _ = self.prepare_minibatch(minibatch)
                     
                     with torch.set_grad_enabled(phase=="train"):
                         
                         recon_inputs, h = self.net(inputs)
                         
-                        loss = self.loss_fn(recon_inputs, targets) + self.h_lambda * h.flatten().abs().sum()
+                        loss = self.loss_fn(recon_inputs, inputs) + self.l1_lambda * h.abs().mean()
                         
                         if phase=="train":
                             
@@ -190,20 +186,6 @@ class Model:
 
         
         self.net.load_state_dict(best_model_wts)
-        
-        return self.net.cpu()
-
-# dataset definition
-class Dataset(torch.utils.data.Dataset):
-    
-    def __init__(self, X):
-        self.X = X
-        
-    def __len__(self):
-        return len(self.X)
-    
-    def __getitem__(self, i):
-        return self.X[i], self.X[i]
 
 
 # other useful utility functions
@@ -215,18 +197,13 @@ def norm_anomaly_split(X, y):
     
     X_norm = X[normal_indeces]
     X_anomaly = X[anomaly_indeces]
+    
+    y_norm = y[normal_indeces]
+    y_anomaly = y[anomaly_indeces]
 
-    return X_norm, X_anomaly
+    return X_norm, y_norm, X_anomaly, y_anomaly
 
-def visualize_using_tsne(X, y, n_components=2):
-    
-    X_transformed = TSNE(n_components = n_components, random_state=0).fit_transform(X)
-    
-    plt.scatter(*zip(*X_transformed[y==1]), marker='o', color='r', s=10, label='Anomalous')
-    plt.scatter(*zip(*X_transformed[y==0]), marker='o', color='g', s=10, label='Normal')
-    plt.legend()
-    plt.show()
-    
+
     
     
     
