@@ -1,189 +1,265 @@
-import sys
-sys.path.append("..") #to access custom "utils" package
+#%%
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 from tqdm import tqdm
-
-import os
-import time as time
-import copy as copy
-import gc
-import tracemalloc
-import GPUtil
-
+from functools import wraps
+import random
 import numpy as np
+import pandas as pd
+import os
+import sys
+sys.path.append("..")
+
+import gc
+import time
+import tracemalloc
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from utils import nn_utils
-from utils import similarity_index
 
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.model_selection import StratifiedKFold, train_test_split
 
-XL_PATH = os.path.join("..", r"radiomicsFeatures/radiomicsFeaturesWithLabels.csv")
-OUT_DIR = r"outputs/bayesianDSAE"
-MASK_FEATS = ["id", "label"]
+ROOT_FOLDER_NAME = "autoencoder"
+dirs = os.getcwd().split(os.path.sep)
+index = dirs.index(ROOT_FOLDER_NAME)
+ROOT_DIR = os.path.sep.join(dirs[:index + 1])
 
-VERBOSE = False
+XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
+PERTURBATIONS_FILE = os.path.join(ROOT_DIR, "outputs", "data_perturbations.npy")
+OUT_DIR = os.path.join(ROOT_DIR, "outputs")
 
-CUDA_DEVICE_ID = 1
-NUM_REPEATS = 100
+NON_FEATURE_COLS = ["id", "label"]
+LABEL = "label"
 
-B = 100
+NUM_FEATS_TO_SELECT = 5
+B = 100 # Monte Carlo samples
+SEED = 42
 
-feats_df = pd.read_csv(XL_PATH)
-# feats_df.head()
+if torch.cuda.is_available():
+    CUDA_DEVICE_ID = 0
+    DEVICE = torch.device(f"cuda:{CUDA_DEVICE_ID}")
+elif torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+else:
+    DEVICE = torch.device("cpu")
+print(f"Using execution device: {DEVICE}")
 
-pids = feats_df.id.to_numpy()
-labels = feats_df.label.to_numpy()
 
-def get_gpu_memory(init_mem):
+def manual_seed(seed):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed(seed)
+            torch.mps.manual_seed(seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+            
+
+def profile_time_and_memory(device):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            
+            start_time = time.perf_counter()
     
-    global CUDA_DEVICE_ID
-    
-    return (GPUtil.getGPUs()[CUDA_DEVICE_ID].memoryUsed-init_mem) #in MiB
-    
-    
-### Feature Selection Pipeline with MonteCarlo Model Resampling
+            gc.collect()
+            tracemalloc.start()
 
-init_gpu_memory = get_gpu_memory(0.0) #in MiB
+            if "cuda" in device.type:
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                get_memory_func = lambda device: torch.cuda.memory_reserved(device)
+            elif "mps" in device.type:
+                torch.mps.empty_cache()
+                get_memory_func = lambda device: torch.mps.driver_allocated_memory() #driver_allocated_memory()
+            else:
+                get_memory_func = lambda device: 0.0
 
-feats = feats_df.columns[~feats_df.columns.isin(MASK_FEATS)].to_list()
+            start_gpu_memory = get_memory_func(device=device)
+            result = func(*args, **kwargs)
+        
 
-results_df = {**{"outer_seed":[], "exe_time":[], "cpu_mem":[], "gpu_mem":[], "b":[], "re_mean0":[], "re_mean1":[]}, **{"delta_"+feat:[] for feat in feats}} # {**dict1, **dict2,...} is a way to merge multiple dictionaries
+            end_time = time.perf_counter()
+            elapsed_time = end_time - start_time
+            
+            _, cpu_mem = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            end_gpu_memory = get_memory_func(device=device)
+            gpu_mem = end_gpu_memory-start_gpu_memory
+            peak_mem = cpu_mem + gpu_mem
 
-if not os.path.exists(OUT_DIR):
-    os.makedirs(OUT_DIR)
+            return result, elapsed_time, peak_mem, cpu_mem, gpu_mem
+        return wrapper
+    return decorator
 
-for i in tqdm(range(NUM_REPEATS), position=0, desc="running bayesianDSAE"):
-    
-    if VERBOSE:
 
-        print(f"Running for repeat#- {i+1}")
-        print("-"*50)
+@manual_seed(SEED)
+@profile_time_and_memory(device=DEVICE)
+def bayesian_dsae_fs(df, mc_samples):
+    features = [feat for feat in df.columns if feat not in NON_FEATURE_COLS]
 
-    start_time = time.perf_counter()
-    gc.collect()
-    tracemalloc.start()
-
-    num_epochs = 1_000
+    # Bayesian DSAE Hyperparameters
+    num_epochs = 1000
     batch_size = 32
     loss_fn = nn.MSELoss()
-    
     lr = 1e-3
-    h_lambda = 1e-2 #with l1 regularization
-    
-    input_dim = len(feats)
+    l1_lambda = 1e-2 
+    input_dim = len(features)
     latent_dim = 10
+    hidden_dims= [50, 30, 20] 
+
+
+    X_df = df[features]
+    y_df = df[LABEL]
+
+    X = X_df.to_numpy()
+    y = y_df.to_numpy().ravel()
+
+    X_norm, y_norm, X_anomaly, y_anomaly = nn_utils.norm_anomaly_split(X, y)
     
-    activation_fn = nn.LeakyReLU()
-    encoder_layers = [50, 30, 20] #under-complete hidden layers
+    X_train = X_norm[:-len(X_anomaly)]
+    y_train = y_norm[:-len(X_anomaly)]
 
-    #the train v/s test pids changes with each repeat; soft-perturbation
-    train_pids, test_pids, train_labels, test_labels = train_test_split(pids, labels, test_size=0.25, random_state=i, stratify=labels)
-
-    X =  feats_df[feats_df["id"].isin(train_pids)][feats].to_numpy()
-    y = feats_df[feats_df["id"].isin(train_pids)].label.to_numpy()
-
-    # scaler = StandardScaler()
-    # X = scaler.fit_transform(X)
-    # X[X>=3] = 3
-    # X[X<=-3] = -3
-
-    X_norm, X_anomaly = nn_utils.norm_anomaly_split(X, y)
-    
-    # we can keep the seed fixed here, because train/val split difference is enough to simulate soft-perturbation
-    np.random.seed(0)
-    idx = np.random.permutation(len(X_norm))
-    
-    X_train= X_norm[idx[:-len(X_anomaly)]]
-    X_test_norm = X_norm[idx[-len(X_anomaly):]]
-    X_test_anomaly = X_anomaly
+    X_test = np.concatenate([X_norm[-len(X_anomaly):], X_anomaly], axis=0)
+    y_test = np.concatenate([y_norm[-len(X_anomaly):], y_anomaly], axis=0)
 
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
-    X_train[X_train>=3] = 3
-    X_train[X_train<=-3] = -3
+    X_train = np.clip(X_train, -3, 3)
     
-    X_test_norm = scaler.transform(X_test_norm)
-    X_test_norm[X_test_norm>=3] = 3
-    X_test_norm[X_test_norm<=-3] = -3
+    X_test = scaler.transform(X_test)
+    X_test = np.clip(X_test, -3, 3)
     
-    X_test_anomaly = scaler.transform(X_test_anomaly)
-    X_test_anomaly[X_test_anomaly>=3] = 3
-    X_test_anomaly[X_test_anomaly<=-3] = -3
-    
-    
-    X_train =  torch.from_numpy(X_train).float()
-    X_test_norm = torch.from_numpy(X_test_norm).float()
-    X_test_anomaly = torch.from_numpy(X_test_anomaly).float()
-    X_test = torch.cat([X_test_norm, X_test_anomaly])
+    X_train = torch.from_numpy(X_train).float().to(DEVICE)
+    y_train = torch.from_numpy(y_train).float().to(DEVICE)
 
-    train_ds = nn_utils.Dataset(X_train)
-    val_ds = nn_utils.Dataset(X_train)
-    dls = {"train":torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True),"val":torch.utils.data.DataLoader(val_ds, batch_size=batch_size)}
+    X_test = torch.from_numpy(X_test).float().to(DEVICE)
+    y_test = torch.from_numpy(y_test).float().to(DEVICE)
+
+    train_ds = torch.utils.data.TensorDataset(X_train, y_train)
+    val_ds = torch.utils.data.TensorDataset(X_test, y_test)
+
+    dls = {
+        "train": torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True),
+        "val": torch.utils.data.DataLoader(val_ds, batch_size=batch_size)
+    }
     
-    bayesian_dsae = nn_utils.bayesianAutoencoder(input_dim, encoder_layers=encoder_layers, latent_dim=latent_dim, activation_fn = activation_fn, dropout_prob=0.5)
+    bayesian_dsae = nn_utils.bayesianAutoencoder(input_dim, hidden_dims=hidden_dims, latent_dim=latent_dim)
     model = nn_utils.Model(bayesian_dsae)
-    model.compile(lr, h_lambda, loss_fn, cuda_device_id=CUDA_DEVICE_ID)
-    _ = model.fit(dls, num_epochs, verbose=False)
-
-    gpu_mem = get_gpu_memory(init_gpu_memory) * 2**20 #MiB to bytes
-    current, cpu_mem = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    model.compile(lr, l1_lambda, loss_fn, device=DEVICE)
+    model.fit(dls, num_epochs, verbose=False)
     
-    exe_time = time.perf_counter()-start_time
-
-    for b in range(B):
-
-        model.net.train() #to enable dropout for stochasticity during inference
-        
-        recon_X_test_norm, h_norm = model.net(X_test_norm)
-        recon_X_test_anomaly, h_anomaly = model.net(X_test_anomaly)
-
-        recon_X_test = torch.cat([recon_X_test_norm, recon_X_test_anomaly])
-        y_test = torch.cat([torch.zeros(len(recon_X_test_norm)), torch.ones(len(recon_X_test_anomaly))])
-        
-        re_test = nn.MSELoss(reduction="none")(recon_X_test, X_test)
-        
-        re_test0 = re_test[y_test==0].mean(dim=0)
-        re_test1 = re_test[y_test==1].mean(dim=0)
-        
-        deltas = re_test1 - re_test0
-        
-        results_df["outer_seed"].append(i)
-        results_df["exe_time"].append(exe_time)
-        results_df["cpu_mem"].append(cpu_mem)
-        results_df["gpu_mem"].append(gpu_mem)
-        results_df["b"].append(b)
-        results_df["re_mean0"].append(re_test0.mean().item())
-        results_df["re_mean1"].append(re_test1.mean().item())
-
-        for feat, delta in zip(feats, deltas):
-            results_df["delta_"+feat].append(delta.item())
-        
-        if VERBOSE:
-            print("b=", b, "normal_mse=",re_test0.mean().item(), "anomaly_mse=", re_test1.mean().item(), "anomaly_mse>normal_mse=", re_test1.mean().item()>re_test0.mean().item())
-
-        
-    _df = pd.DataFrame(results_df)
-    _results_df = _df[_df.outer_seed==i].mean()
+    # Monte Carlo Inference Phase
+    model.net.train() # Keeps dropout active for stochasticity 
     
-    if VERBOSE:
-        print("normal_mse=",_results_df.re_mean0, "anomaly_mse=", _results_df.re_mean1, "anomaly_mse>normal_mse=", _results_df.re_mean1>_results_df.re_mean0)
-
-    delta_df = _results_df[["delta_"+feat for feat in feats]]
-
-    ranks = (len(delta_df) - (delta_df.argsort().argsort() + 1) + 1).to_list()
-    rank_df = pd.DataFrame({"feature":feats, "rank":ranks})
-    rank_df.to_csv(os.path.join(OUT_DIR, f"rank_df{i}.csv"), index=False)
+    mc_deltas = []
     
+    with torch.no_grad():
+        for _ in range(mc_samples):
+            recon_X_test, _ = model.net(X_test)
+            
+            re_test = nn.MSELoss(reduction="none")(recon_X_test, X_test)
+            re_test0 = re_test[y_test == 0].mean(dim=0)
+            re_test1 = re_test[y_test == 1].mean(dim=0)
+            
+            deltas = (re_test1 - re_test0).cpu().numpy()
+            mc_deltas.append(deltas)
+            
+    # Calculate the mean score across the B iterations
+    mean_deltas = np.mean(mc_deltas, axis=0)
     
-results_df = pd.DataFrame(results_df) 
-results_df.to_csv(os.path.join(OUT_DIR, "results_df.csv"), index=False)
+    rank_dict = {"feature": features, "score": mean_deltas}
+    rank_df = pd.DataFrame(rank_dict)
+    
+    rank_df["rank"] = rank_df["score"].rank(method="min", ascending=False).astype(int) 
+    rank_df.sort_values("rank", inplace=True)
+    rank_df.reset_index(drop=True, inplace=True)
 
-print("Completed successfully")
+    return rank_df.to_dict(orient="list")
+
+def main():
+
+    radiomics_df = pd.read_csv(XL_PATH)
+    perturbations = np.load(PERTURBATIONS_FILE, allow_pickle=True).item()
+    
+    method_name = "bayesianAE"
+    outdir = os.path.join(OUT_DIR, "filtering", method_name)
+    os.makedirs(outdir, exist_ok=True)
+
+    for perturb_id in tqdm(perturbations, desc=f"Running data-perturbation on {method_name}", position=0):
+        
+        train_pids = perturbations[perturb_id]["train"]
+        test_pids = perturbations[perturb_id]["val"]
+
+        train_df = radiomics_df[radiomics_df.id.isin(train_pids)]
+        val_df = radiomics_df[radiomics_df.id.isin(test_pids)]
+
+        rank_dict, elapsed_time, peak_mem, cpu_mem, gpu_mem = bayesian_dsae_fs(train_df, mc_samples=B)
+
+        rank_df = pd.DataFrame(rank_dict)
+        rank_df.sort_values("rank", inplace=True)
+        rank_df.reset_index(drop=True, inplace=True)
+
+        # Select Top N Features
+        selected_feats = rank_df.head(NUM_FEATS_TO_SELECT).feature.to_list()
+
+        X_train = train_df[selected_feats]
+        y_train = train_df[LABEL]
+
+        X_val = val_df[selected_feats]
+        y_val = val_df[LABEL]
+
+        # Downstream Evaluation Model
+        pred_model = make_pipeline(StandardScaler(), LogisticRegression(C=np.inf, max_iter=10_000, random_state=SEED))
+        pred_model.fit(X_train, y_train)
+    
+        predictions = pred_model.predict_proba(X_val)[:, 1]
+        targets = y_val.to_numpy().ravel()
+
+        out_path = os.path.join(outdir, f"{perturb_id}.npz")
+        np.savez_compressed(
+            out_path, 
+            rank_dict=np.array(rank_dict, dtype=object), 
+            predictions=predictions, 
+            targets=targets, 
+            elapsed_time=elapsed_time, 
+            peak_memory=peak_mem, 
+            cpu_mem=cpu_mem, 
+            gpu_mem=gpu_mem
+        )
+
+if __name__ == "__main__":
+    main()
+
+# #%%
+# # sanity check
+# import numpy as np
+# import os
+# from sklearn.metrics import roc_auc_score
+
+# root_dir = "/Users/sithin/research/phd/autoencoder"
+
+# fs_method = "filtering/bayesianAE"
+# _ = np.load(os.path.join(root_dir, "outputs", fs_method, "0.npz"), allow_pickle=True)
+
+
+# print(_)
+
+# rank_df = pd.DataFrame(_["rank_dict"].item())
+# predictions = _["predictions"]
+# targets = _["targets"]
+
+# print(roc_auc_score(targets, predictions))
+# display(rank_df.head())
+# display(rank_df.tail())
+# print(_["elapsed_time"], _["peak_memory"]/2**20, _["cpu_mem"]/2**20, _["gpu_mem"]/2**20)
