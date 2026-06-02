@@ -7,9 +7,11 @@ from mrmr import mrmr_classif
 from scipy.stats import mannwhitneyu
 
 from tqdm import tqdm
-from functools import wraps
 import numpy as np
 import pandas as pd
+
+from functools import wraps
+from pathlib import Path
 import os
 
 import gc
@@ -17,9 +19,7 @@ import time
 import tracemalloc
 
 ROOT_FOLDER_NAME = "autoencoder"
-dirs = os.getcwd().split(os.path.sep)
-index = dirs.index(ROOT_FOLDER_NAME)
-ROOT_DIR = os.path.sep.join(dirs[:index + 1])
+ROOT_DIR = next(p for p in Path(__file__).parents if p.name == ROOT_FOLDER_NAME)
 
 XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
 PERTURBATIONS_FILE = os.path.join(ROOT_DIR, "outputs", "data_perturbations.npy")
@@ -98,6 +98,10 @@ def main():
     fs_methods = [mannwhitneyu, mutual_info_classif, mrmr_classif]
 
     for fs_method in fs_methods:
+
+        outdir = os.path.join(OUT_DIR, "filter", fs_method.__name__)
+        os.makedirs(outdir, exist_ok=True)
+
         for perturb_id in tqdm(perturbations, desc=f"Running soft data-perturbation on {fs_method.__name__}", position=0):
             
             train_pids = perturbations[perturb_id]["train"]
@@ -125,13 +129,17 @@ def main():
         
             predictions = pred_model.predict_proba(X_val)[:,1]
             targets = y_val.to_numpy().ravel()
-
-            outdir = os.path.join(OUT_DIR, "filter", fs_method.__name__)
-            os.makedirs(outdir, exist_ok=True)
         
             out_path = os.path.join(outdir, f"{perturb_id}.npz")
             np.savez_compressed(out_path, rank_dict=np.array(rank_dict, dtype=object), predictions=predictions, targets=targets, elapsed_time=elapsed_time, peak_memory=peak_mem)
 
+        # run fs on the entire dataset
+        rank_dict, elapsed_time, peak_mem = filter_fs(radiomics_df, fs_method)
+        rank_df = pd.DataFrame(rank_dict)
+        rank_df.sort_values("rank", inplace=True)
+        rank_df.reset_index(drop=True, inplace=True)
+        rank_df.to_csv(os.path.join(outdir, "rank_df.csv"), index=False)
+    
 if __name__ == "__main__":
     main()
 

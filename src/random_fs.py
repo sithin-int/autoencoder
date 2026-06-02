@@ -3,9 +3,11 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from tqdm import tqdm
-from functools import wraps
 import numpy as np
 import pandas as pd
+
+from functools import wraps
+from pathlib import Path
 import os
 
 import gc
@@ -13,9 +15,7 @@ import time
 import tracemalloc
 
 ROOT_FOLDER_NAME = "autoencoder"
-dirs = os.getcwd().split(os.path.sep)
-index = dirs.index(ROOT_FOLDER_NAME)
-ROOT_DIR = os.path.sep.join(dirs[:index + 1])
+ROOT_DIR = next(p for p in Path(__file__).parents if p.name == ROOT_FOLDER_NAME)
 
 XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
 PERTURBATIONS_FILE = os.path.join(ROOT_DIR, "outputs", "data_perturbations.npy")
@@ -78,8 +78,10 @@ def main():
 
     perturbations = np.load(PERTURBATIONS_FILE, allow_pickle=True).item()
 
+    outdir = os.path.join(OUT_DIR, "random")
+    os.makedirs(outdir, exist_ok=True)
+
     for perturb_id in tqdm(perturbations, desc="Running soft data-perturbation on Random FS", position=0):
-        
         
         train_pids = perturbations[perturb_id]["train"]
         test_pids = perturbations[perturb_id]["val"]
@@ -110,10 +112,6 @@ def main():
         predictions = pred_model.predict_proba(X_val)[:, 1]
         targets = y_val.to_numpy().ravel()
 
-        # 3. Saving Outputs
-        outdir = os.path.join(OUT_DIR, "random")
-        os.makedirs(outdir, exist_ok=True)
-    
         out_path = os.path.join(outdir, f"{perturb_id}.npz")
         np.savez_compressed(
             out_path, 
@@ -123,6 +121,13 @@ def main():
             elapsed_time=elapsed_time, 
             peak_memory=peak_mem
         )
+
+    # run fs on the entire dataset
+    rank_dict, elapsed_time, peak_mem = random_fs(radiomics_df, random_state)
+    rank_df = pd.DataFrame(rank_dict)
+    rank_df.sort_values("rank", inplace=True)
+    rank_df.reset_index(drop=True, inplace=True)
+    rank_df.to_csv(os.path.join(outdir, "rank_df.csv"), index=False)
 
 if __name__ == "__main__":
     main()

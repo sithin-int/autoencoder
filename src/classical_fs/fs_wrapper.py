@@ -9,9 +9,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
 from tqdm import tqdm
-from functools import wraps
 import numpy as np
 import pandas as pd
+
+from functools import wraps
+from pathlib import Path
 import os
 
 import gc
@@ -19,9 +21,7 @@ import time
 import tracemalloc
 
 ROOT_FOLDER_NAME = "autoencoder"
-dirs = os.getcwd().split(os.path.sep)
-index = dirs.index(ROOT_FOLDER_NAME)
-ROOT_DIR = os.path.sep.join(dirs[:index + 1])
+ROOT_DIR = next(p for p in Path(__file__).parents if p.name == ROOT_FOLDER_NAME)
 
 XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
 PERTURBATIONS_FILE = os.path.join(ROOT_DIR, "outputs", "data_perturbations.npy")
@@ -84,7 +84,7 @@ def iterative_bsfs(df, estimator):
         X_df = df[remaining]
         y_df = df[LABEL]
         
-        result, elapsed_time, peak_mem = bsfs(clone(estimator), X_df, y_df)
+        result, elapsed_time, peak_mem = bsfs(estimator, X_df, y_df)
         remaining = result["kept"]
         eliminated = result["eliminated"]
 
@@ -118,6 +118,9 @@ def main():
 
     for estimator in estimators:
 
+        outdir = os.path.join(OUT_DIR, "wrapper", estimator[-1].__class__.__name__)
+        os.makedirs(outdir, exist_ok=True)
+
         for perturb_id in tqdm(perturbations, position=0, desc=f"Running soft data-perturbations on {estimator[-1].__class__.__name__}"):
 
             train_pids = perturbations[perturb_id]["train"]
@@ -126,7 +129,7 @@ def main():
             train_df = radiomics_df[radiomics_df.id.isin(train_pids)]
             val_df = radiomics_df[radiomics_df.id.isin(test_pids)]
 
-            rank_dict, elapsed_time, peak_mem = iterative_bsfs(train_df, estimator)
+            rank_dict, elapsed_time, peak_mem = iterative_bsfs(train_df, clone(estimator))
 
             rank_df = pd.DataFrame(rank_dict)
             rank_df.sort_values("rank", inplace=True)
@@ -146,11 +149,14 @@ def main():
             predictions = pred_model.predict_proba(X_val)[:,1]
             targets = y_val.to_numpy().ravel()
 
-            outdir = os.path.join(OUT_DIR, "wrapper", estimator[-1].__class__.__name__)
-            os.makedirs(outdir, exist_ok=True)
-        
             out_path = os.path.join(outdir, f"{perturb_id}.npz")
             np.savez_compressed(out_path, rank_dict=np.array(rank_dict, dtype=object), predictions=predictions, targets=targets, elapsed_time=elapsed_time, peak_memory=peak_mem)
 
+        # run fs on the entire dataset
+        rank_dict, elapsed_time, peak_mem = iterative_bsfs(radiomics_df, clone(estimator))
+        rank_df = pd.DataFrame(rank_dict)
+        rank_df.sort_values("rank", inplace=True)
+        rank_df.reset_index(drop=True, inplace=True)
+        rank_df.to_csv(os.path.join(outdir, "rank_df.csv"), index=False)
 if __name__ == "__main__":
     main()

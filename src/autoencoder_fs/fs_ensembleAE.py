@@ -5,13 +5,14 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
 from tqdm import tqdm
-from functools import wraps
 import random
 import numpy as np
 import pandas as pd
+
+from functools import wraps
+from pathlib import Path
 import os
 import sys
-sys.path.append("..")
 
 import gc
 import time
@@ -22,12 +23,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils import nn_utils
-
 ROOT_FOLDER_NAME = "autoencoder"
-dirs = os.getcwd().split(os.path.sep)
-index = dirs.index(ROOT_FOLDER_NAME)
-ROOT_DIR = os.path.sep.join(dirs[:index + 1])
+ROOT_DIR = next(p for p in Path(__file__).parents if p.name == ROOT_FOLDER_NAME)
+sys.path.append(os.path.join(ROOT_DIR, "src"))
+from utils import nn_utils
 
 XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
 PERTURBATIONS_FILE = os.path.join(ROOT_DIR, "outputs", "data_perturbations.npy")
@@ -291,6 +290,12 @@ def main():
             cpu_mem=cpu_mem, 
             gpu_mem=gpu_mem
         )
+    # run fs on the entire dataset
+    rank_dict, elapsed_time, peak_mem, cpu_mem, gpu_mem = ensemble_dsae_fs(radiomics_df, num_ensembles=B)
+    rank_df = pd.DataFrame(rank_dict)
+    rank_df.sort_values("rank", inplace=True)
+    rank_df.reset_index(drop=True, inplace=True)
+    rank_df.to_csv(os.path.join(outdir, "rank_df.csv"), index=False)
         
 
 
