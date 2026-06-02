@@ -126,7 +126,7 @@ def main():
             predictions = pred_model.predict_proba(X_val)[:,1]
             targets = y_val.to_numpy().ravel()
 
-            outdir = os.path.join(OUT_DIR, "filtering", fs_method.__name__)
+            outdir = os.path.join(OUT_DIR, "filter", fs_method.__name__)
             os.makedirs(outdir, exist_ok=True)
         
             out_path = os.path.join(outdir, f"{perturb_id}.npz")
@@ -143,7 +143,7 @@ if __name__ == "__main__":
 
 # root_dir = "/Users/sithin/research/phd/autoencoder"
 
-# fs_method = "filtering/mutual_info_classif"
+# fs_method = "filter/mutual_info_classif"
 # _ = np.load(os.path.join(root_dir, "outputs", fs_method, "0.npz"), allow_pickle=True)
 
 

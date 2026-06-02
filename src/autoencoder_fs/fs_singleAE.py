@@ -15,6 +15,7 @@ sys.path.append("..")
 import gc
 import time
 import tracemalloc
+import threading
 
 import torch
 import torch.nn as nn
@@ -63,6 +64,45 @@ def manual_seed(seed):
         return wrapper
     return decorator
             
+class TraceGPUAllocation:
+    def __init__(self, device):
+        self.keep_measuring = True
+        self.peak_gpu_mem = 0
+        self.device = device
+        
+        if "cuda" in device.type:
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.empty_cache()
+            self.get_memory_func = lambda device: torch.cuda.memory_allocated(device)
+        elif "mps" in device.type:
+            torch.mps.empty_cache()
+            self.get_memory_func = lambda device: torch.mps.current_allocated_memory()
+        else:
+            self.get_memory_func = lambda device: 0.0
+
+        self.start_mem = self.get_memory_func(self.device)
+
+    def start(self):
+        self.thread = threading.Thread(target=self.trace_memory, daemon=True)
+        self.thread.start()
+
+    def trace_memory(self):
+        while self.keep_measuring:
+            # Check current memory
+            current_mem = self.get_memory_func(self.device) - self.start_mem
+            # Update peak if current is higher
+            if current_mem > self.peak_gpu_mem:
+                self.peak_gpu_mem = current_mem
+            # Pause briefly to prevent the while-loop from hogging the CPU
+            time.sleep(0.001)
+
+    def get_traced_memory(self):
+        return self.peak_gpu_mem
+
+    def stop(self):
+        self.keep_measuring = False
+        self.thread.join()
+
 
 def profile_time_and_memory(device):
     def decorator(func):
@@ -74,27 +114,21 @@ def profile_time_and_memory(device):
             gc.collect()
             tracemalloc.start()
 
-            if "cuda" in device.type:
-                torch.cuda.empty_cache()
-                torch.cuda.reset_peak_memory_stats()
-                get_memory_func = lambda device: torch.cuda.memory_reserved(device)
-            elif "mps" in device.type:
-                torch.mps.empty_cache()
-                get_memory_func = lambda device: torch.mps.driver_allocated_memory() #driver_allocated_memory()
-            else:
-                get_memory_func = lambda device: 0.0
+            tracegalloc = TraceGPUAllocation(device)
+            tracegalloc.start()
 
-            start_gpu_memory = get_memory_func(device=device)
             result = func(*args, **kwargs)
-        
+            
+            gpu_mem = tracegalloc.get_traced_memory()
+            tracegalloc.stop()
 
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
             
             _, cpu_mem = tracemalloc.get_traced_memory()
             tracemalloc.stop()
-            end_gpu_memory = get_memory_func(device=device)
-            gpu_mem = end_gpu_memory-start_gpu_memory
+
+            
             peak_mem = cpu_mem + gpu_mem
 
             return result, elapsed_time, peak_mem, cpu_mem, gpu_mem
@@ -166,6 +200,15 @@ def dsae_fs(df):
 
     
     deltas = (re_test1 - re_test0).cpu().numpy()
+
+    del dsae, model, X_train, y_train, X_test, y_test, train_ds, val_ds, dls
+    if "cuda" in DEVICE.type:   
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+    elif "mps" in DEVICE.type:
+        torch.mps.empty_cache()
+    else:
+        pass
     
     rank_dict = {"feature": features, "score": deltas}
     rank_df = pd.DataFrame(rank_dict)
@@ -182,7 +225,7 @@ def main():
     perturbations = np.load(PERTURBATIONS_FILE, allow_pickle=True).item()
     
     method_name = "singleAE"
-    outdir = os.path.join(OUT_DIR, "filtering", method_name)
+    outdir = os.path.join(OUT_DIR, "filter", method_name)
     os.makedirs(outdir, exist_ok=True)
 
     for perturb_id in tqdm(perturbations, desc=f"Running data-perturbation on {method_name}", position=0):
@@ -224,6 +267,29 @@ def main():
             cpu_mem=cpu_mem, 
             gpu_mem=gpu_mem
         )
+        
 
 if __name__ == "__main__":
     main()
+# #%%
+# # sanity check
+# import numpy as np
+# import os
+# from sklearn.metrics import roc_auc_score
+
+# root_dir = "/Users/sithin/research/phd/autoencoder"
+
+# fs_method = "filter/singleAE"
+# _ = np.load(os.path.join(root_dir, "outputs", fs_method, "0.npz"), allow_pickle=True)
+
+
+# print(_)
+
+# rank_df = pd.DataFrame(_["rank_dict"].item())
+# predictions = _["predictions"]
+# targets = _["targets"]
+
+# print(roc_auc_score(targets, predictions))
+# display(rank_df.head())
+# display(rank_df.tail())
+# print(_["elapsed_time"], _["peak_memory"]/2**20, _["cpu_mem"]/2**20, _["gpu_mem"]/2**20)
