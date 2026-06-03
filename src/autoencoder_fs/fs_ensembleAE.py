@@ -298,11 +298,12 @@ def main():
     rank_df.to_csv(os.path.join(outdir, "rank_df.csv"), index=False)
         
 
-
+#%%
 
 if __name__ == "__main__":
     main()
 
+#%%
 # #%%
 # # sanity check
 # import numpy as np

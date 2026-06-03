@@ -63,7 +63,7 @@ def bsfs(estimator, X_df, y_df, cv=5):
     X = X_df.to_numpy()
     y = y_df.to_numpy().ravel()
 
-    sfs = SFS(estimator, n_features_to_select=len(features)-1, direction='backward', scoring="roc_auc", cv=cv, n_jobs=1)
+    sfs = SFS(estimator, n_features_to_select=len(features)-1, direction='backward', scoring="roc_auc", cv=cv, n_jobs=-1)
     sfs.fit(X,y)
    
     kept = features[sfs.support_]
@@ -108,7 +108,7 @@ def main():
     estimators = [
         make_pipeline(StandardScaler(), LogisticRegression(C=np.inf, max_iter=10_000, random_state=42)), #no penalty
         make_pipeline(StandardScaler(), SVC(kernel="linear", max_iter=10_000, random_state=42, probability=False)),
-        make_pipeline(StandardScaler(), RandomForestClassifier(n_jobs=1, random_state=42)),
+        make_pipeline(StandardScaler(), RandomForestClassifier(n_jobs=-1, random_state=42)),
         make_pipeline(StandardScaler(), MLPClassifier(max_iter=10_000, random_state=42))
     ]
 
