@@ -1,24 +1,25 @@
 #%%
 import os
+import sys
 from pathlib import Path
 
 import pandas as pd
 from tqdm import tqdm
 import numpy as np
-from utils import similarity_index
 
 from sklearn.metrics import roc_auc_score
 
 ROOT_FOLDER_NAME = "autoencoder"
 ROOT_DIR = next(p for p in Path(__file__).parents if p.name == ROOT_FOLDER_NAME)
-
+sys.path.append(os.path.join(ROOT_DIR, "src"))
+from utils import similarity_index
 
 XL_PATH = os.path.join(ROOT_DIR, "inputs", "radiomicsFeaturesWithLabels.csv")
 DATA_DIR = os.path.join(ROOT_DIR, "outputs")
 OUT_DIR = os.path.join(DATA_DIR, "analysis")
 
 RADIOMICS_DF = pd.read_csv(XL_PATH)
-FS_METHODS = ["filter/mannwhitneyu", "filter/mrmr_classif", "filter/mutual_info_classif", "embedded/LASSO", "wrapper/LogisticRegression", "wrapper/SVC", "wrapper/RandomForestClassifier", "wrapper/MLPClassifier", "filter/singleAE", "filter/bayesianAE", "filter/ensembleAE"]
+FS_METHODS = ["filter/mannwhitneyu", "filter/mrmr_classif", "filter/mutual_info_classif", "embedded/LASSO", "wrapper/LogisticRegression", "wrapper/SVC", "wrapper/RandomForestClassifier", "wrapper/MLPClassifier", "filter/xval_contains_anomalies/singleAE", "filter/xval_contains_anomalies/bayesianAE", "filter/xval_contains_anomalies/ensembleAE"]
 SIMILARITY_METHODS= {"jaccard":similarity_index.jaccard, "dice":similarity_index.dice, "kuncheva":similarity_index.kuncheva, "mwm":similarity_index.mwm}
 
 NUM_DATA_PERTURBATIONS = 100 #total=101, we only use 1 to 100, 0 is ignored
@@ -131,7 +132,7 @@ for fs_method in FS_METHODS:
 #%%
 # Selecting the signature
 top_k = 5
-FS_METHODS = ["filter/mannwhitneyu", "filter/mrmr_classif", "filter/mutual_info_classif", "embedded/LASSO", "filter/singleAE", "filter/bayesianAE"]
+
 selected_feats_df = {"fs_method":[], "selected_feats":[]}
 for fs_method in FS_METHODS:
 
@@ -144,6 +145,69 @@ selected_feats_df = pd.DataFrame(selected_feats_df)
 selected_feats_df.to_csv(os.path.join(OUT_DIR, "selected_feats_df.csv"), index=False)
 
 display(selected_feats_df)
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+
+# Seaborn styling for a cleaner look
+sns.set(style="whitegrid", context="notebook", font_scale=1.1)
+df_exploded = selected_feats_df.explode("selected_feats").reset_index(drop=True)
+# Pivot table creation (as you already did)
+pivot = pd.crosstab(df_exploded["fs_method"], df_exploded["selected_feats"])
+
+# Sort features by frequency (most to least)
+top_features = pivot.sum().sort_values(ascending=False).index
+pivot = pivot[top_features]
+
+label_mapping = {
+    "filter/mannwhitneyu":"WLCX",
+    "filter/mrmr_classif":"MRMR",
+    "filter/mutual_info_classif":"MIM",
+    "embedded/LASSO":"LASSO",
+    "wrapper/LogisticRegression": "SBS+LR",
+    "wrapper/SVC": "SBS+L-SVM",
+    "wrapper/RandomForestClassifier": "SBS+RF",
+    "wrapper/MLPClassifier": "SBS+MLP",
+    "filter/xval_contains_anomalies/singleAE":"singleAE", 
+    "filter/xval_contains_anomalies/bayesianAE": "bayesianAE", 
+    "filter/xval_contains_anomalies/ensembleAE": "ensembleAE"
+}
+
+pivot = pivot.reindex(FS_METHODS)
+
+
+# Create the plot
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Plot 'x' markers for each selected feature-method pair
+for i, method in enumerate(pivot.index):
+    for j, feat in enumerate(pivot.columns):
+        if pivot.loc[method, feat]:
+            ax.scatter(j, i, marker='x', color='black', s=60, linewidths=1.5)
+
+# Format axes
+
+y_labels = [label_mapping.get(method, method) for method in pivot.index]
+ax.set_yticks(range(len(pivot.index)))
+ax.set_yticklabels(y_labels, fontsize=10)
+ax.set_xticks(range(len(pivot.columns)))
+ax.set_xticklabels(pivot.columns, rotation=45, ha='right', fontsize=9)
+
+# Add labels and styling
+ax.set_xlabel("Top Frequent Features", fontsize=12)
+ax.set_ylabel("FS Method", fontsize=12)
+# ax.set_title("Top Features Selected by Different Methods", fontsize=14)
+ax.grid(axis='y', linestyle='--', alpha=0.3)
+ax.tick_params(axis='both', which='major', length=0)
+
+plt.tight_layout()
+
+# plt.savefig("freq_plot.tif", format="tiff", dpi=600)
+
+
+plt.show()
+
 
 #%%
 # Identifying the frequent features
@@ -197,9 +261,13 @@ label_mapping = {
     "filter/mrmr_classif":"MRMR",
     "filter/mutual_info_classif":"MIM",
     "embedded/LASSO":"LASSO",
-    "filter/singleAE":"singleAE",
-    "filter/bayesianAE": "bayesianAE"
-    
+    "wrapper/LogisticRegression": "SBS+LR",
+    "wrapper/SVC": "SBS+L-SVM",
+    "wrapper/RandomForestClassifier": "SBS+RF",
+    "wrapper/MLPClassifier": "SBS+MLP",
+    "filter/xval_contains_anomalies/singleAE":"singleAE", 
+    "filter/xval_contains_anomalies/bayesianAE": "bayesianAE", 
+    "filter/xval_contains_anomalies/ensembleAE": "ensembleAE"
 }
 
 pivot = pivot.reindex(FS_METHODS)

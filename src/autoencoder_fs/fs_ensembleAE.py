@@ -161,9 +161,44 @@ def ensemble_dsae_fs(df, num_ensembles):
     ensemble_deltas = []
     num_anomaly = len(X_anomaly)
     for b in tqdm(range(num_ensembles), desc="Running ensembleAE", position=0):
-        # Local seed to ensure consistent sub-sampling per iteration b
-        np.random.seed(b) 
+
         idx = np.random.permutation(len(X_norm))
+
+        X_train = X_norm[idx[:-num_anomaly]]
+        y_train = y_norm[idx[:-num_anomaly]]
+
+        X_val = X_norm[idx[-num_anomaly:]]
+        y_val = y_norm[idx[-num_anomaly:]]    
+
+        X_test = np.concatenate([X_val, X_anomaly],axis=0)
+        y_test = np.concatenate([y_val, y_anomaly], axis=0)
+
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_train = np.clip(X_train, -3, 3)
+
+        X_val = scaler.transform(X_val)
+        X_val = np.clip(X_val, -3, 3)
+        
+        X_test = scaler.transform(X_test)
+        X_test = np.clip(X_test, -3, 3)
+        
+        X_train = torch.from_numpy(X_train).float().to(DEVICE)
+        y_train = torch.from_numpy(y_train).float().to(DEVICE)
+
+        X_val = torch.from_numpy(X_val).float().to(DEVICE)
+        y_val = torch.from_numpy(y_val).float().to(DEVICE)
+
+        X_test = torch.from_numpy(X_test).float().to(DEVICE)
+        y_test = torch.from_numpy(y_test).float().to(DEVICE)
+
+        train_ds = torch.utils.data.TensorDataset(X_train, y_train)
+        val_ds = torch.utils.data.TensorDataset(X_val, y_val)
+
+        dls = {
+            "train": torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True),
+            "val": torch.utils.data.DataLoader(val_ds, batch_size=batch_size)
+        }
         
         # Sub-sample train/test for this specific ensemble model
         X_train = X_norm[idx[:-num_anomaly]]
@@ -171,6 +206,7 @@ def ensemble_dsae_fs(df, num_ensembles):
 
         X_test = X_norm[idx[-num_anomaly:]]
         y_test = y_norm[idx[-num_anomaly:]]
+
 
         X_test = np.concatenate([X_test, X_anomaly], axis=0)
         y_test = np.concatenate([y_test, y_anomaly], axis=0)
@@ -297,13 +333,8 @@ def main():
     rank_df.reset_index(drop=True, inplace=True)
     rank_df.to_csv(os.path.join(outdir, "rank_df.csv"), index=False)
         
-
-#%%
-
 if __name__ == "__main__":
     main()
-
-#%%
 # #%%
 # # sanity check
 # import numpy as np
