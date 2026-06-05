@@ -20,7 +20,7 @@ OUT_DIR = os.path.join(DATA_DIR, "analysis")
 
 RADIOMICS_DF = pd.read_csv(XL_PATH)
 #FS_METHODS = ["filter/mannwhitneyu", "filter/mutual_info_classif", "filter/mrmr_classif", "embedded/LASSO", "wrapper/LogisticRegression", "wrapper/SVC", "wrapper/RandomForestClassifier", "wrapper/MLPClassifier", "filter/singleAE", "filter/ensembleAE", "filter/bayesianAE"]
-FS_METHODS = ["filter/singleAE", "filter/singleAE_async"]
+FS_METHODS = ["filter/memory_allocated/singleAE", "filter/memory_allocated/bayesianAE", "filter/memory_allocated/ensembleAE"]
 
 SIMILARITY_METHODS= {"jaccard":similarity_index.jaccard, "dice":similarity_index.dice, "kuncheva":similarity_index.kuncheva, "mwm":similarity_index.mwm}
 
@@ -84,15 +84,24 @@ usage_df = {"perturb_idx":[], "fs_method":[], "time":[], "peak_memory":[]}
 
 for fs_method in FS_METHODS:
     for i in range(NUM_DATA_PERTURBATIONS):
-        dict_i = np.load(os.path.join(DATA_DIR, fs_method, f"{i}.npz"), allow_pickle=True)
+        dict_i = np.load(os.path.join(DATA_DIR, fs_method, f"{i+1}.npz"), allow_pickle=True)
         
-        usage_df["perturb_idx"].append(i)
+        usage_df["perturb_idx"].append(i+1)
         usage_df["fs_method"].append(fs_method)
         usage_df["time"].append(dict_i["elapsed_time"])
         usage_df["peak_memory"].append(dict_i["peak_memory"]/2**20)
 
 usage_df = pd.DataFrame(usage_df)
 usage_df.to_csv(os.path.join(OUT_DIR, 'usage.csv'), index=False)
+
+print("min usage***")
+# Displaying mean usage estimates
+min_usage_df = usage_df.groupby(by=["fs_method"]).min()
+
+for fs_method in FS_METHODS:
+    print(f"{fs_method}")
+    display(min_usage_df.loc[fs_method])
+    print("\n")
 
 print("mean usage***")
 # Displaying mean usage estimates
