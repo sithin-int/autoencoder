@@ -73,14 +73,18 @@ class TraceGPUAllocation:
         if "cuda" in device.type:
             torch.cuda.reset_peak_memory_stats()
             torch.cuda.empty_cache()
-            self.get_memory_func = lambda device: torch.cuda.memory_allocated(device)
+            torch.cuda.synchronize()
+            self.get_memory_func = lambda: torch.cuda.max_memory_reserved(device)
+            # self.get_memory_func = lambda device: torch.cuda.memory_allocated(device)
         elif "mps" in device.type:
             torch.mps.empty_cache()
-            self.get_memory_func = lambda device: torch.mps.current_allocated_memory()
+            torch.mps.synchronize()
+            self.get_memory_func = lambda: torch.mps.driver_allocated_memory()
+            # self.get_memory_func = lambda device: torch.mps.current_allocated_memory()
         else:
-            self.get_memory_func = lambda device: 0.0
+            self.get_memory_func = lambda: 0
 
-        self.start_mem = self.get_memory_func(self.device)
+        self.start_mem = self.get_memory_func()
 
     def start(self):
         self.thread = threading.Thread(target=self.trace_memory, daemon=True)
@@ -89,7 +93,7 @@ class TraceGPUAllocation:
     def trace_memory(self):
         while self.keep_measuring:
             # Check current memory
-            current_mem = self.get_memory_func(self.device) - self.start_mem
+            current_mem = self.get_memory_func() - self.start_mem
             # Update peak if current is higher
             if current_mem > self.peak_gpu_mem:
                 self.peak_gpu_mem = current_mem
@@ -210,15 +214,8 @@ def dsae_fs(df):
     
     deltas = (re_test1 - re_test0).cpu().numpy()
 
-    del dsae, model, X_train, y_train, X_test, y_test, train_ds, val_ds, dls
-    if "cuda" in DEVICE.type:   
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-    elif "mps" in DEVICE.type:
-        torch.mps.empty_cache()
-    else:
-        pass
-    
+    del dsae, model, X_train, y_train, X_test, y_test, train_ds, val_ds, dls #during the next call of this function, the decorator will be called, which will flush the cache
+
     rank_dict = {"feature": features, "score": deltas}
     rank_df = pd.DataFrame(rank_dict)
     

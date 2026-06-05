@@ -72,14 +72,19 @@ class TraceGPUAllocation:
         if "cuda" in device.type:
             torch.cuda.reset_peak_memory_stats()
             torch.cuda.empty_cache()
-            self.get_memory_func = lambda device: torch.cuda.memory_allocated(device)
+            torch.cuda.synchronize()
+            self.get_memory_func = lambda: torch.cuda.max_memory_reserved(device)
+            # self.get_memory_func = lambda device: torch.cuda.memory_allocated(device)
         elif "mps" in device.type:
             torch.mps.empty_cache()
-            self.get_memory_func = lambda device: torch.mps.current_allocated_memory()
+            torch.mps.synchronize()
+            self.get_memory_func = lambda: torch.mps.driver_allocated_memory()
+            # self.get_memory_func = lambda device: torch.mps.current_allocated_memory()
         else:
-            self.get_memory_func = lambda device: 0.0
+            self.get_memory_func = lambda: 0
 
-        self.start_mem = self.get_memory_func(self.device)
+
+        self.start_mem = self.get_memory_func()
 
     def start(self):
         self.thread = threading.Thread(target=self.trace_memory, daemon=True)
@@ -88,7 +93,7 @@ class TraceGPUAllocation:
     def trace_memory(self):
         while self.keep_measuring:
             # Check current memory
-            current_mem = self.get_memory_func(self.device) - self.start_mem
+            current_mem = self.get_memory_func() - self.start_mem
             # Update peak if current is higher
             if current_mem > self.peak_gpu_mem:
                 self.peak_gpu_mem = current_mem
@@ -252,12 +257,14 @@ def ensemble_dsae_fs(df, num_ensembles):
             deltas = (re_test1 - re_test0).cpu().numpy()
             ensemble_deltas.append(deltas)
         
-        del dsae, model, X_train, y_train, X_test, y_test, train_ds, val_ds, dls
+        del dsae, model, X_train, y_train, X_test, y_test, train_ds, val_ds, dls #since the decorator will be called after the loop terminates, we need to flush the cache manually during each loop to avoid caching gpu memory across iterations
         if "cuda" in DEVICE.type:   
-            torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
         elif "mps" in DEVICE.type:
             torch.mps.empty_cache()
+            torch.mps.synchronize()
         else:
             pass
         
