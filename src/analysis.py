@@ -125,8 +125,15 @@ plot_data = stability_df[
 plot_data['fs_method'] = pd.Categorical(plot_data['fs_method'], categories=custom_order, ordered=True)
 plot_data['fs_method'] = plot_data['fs_method'].map(label_mapping)
 
+sim_mapping = {
+    "global_spearman": "spearman (global)",
+    "kuncheva": "kuncheva (top-5)",
+    "mwm": "mwm (top-5)"
+}
+plot_data['similarity_measure'] = plot_data['similarity_measure'].map(sim_mapping)
 
-plt.figure(figsize=(12, 6))
+plt.figure(figsize=(18, 6)) # Increased width from 12 to 18 to add spacing between x-axis points
+
 
 sns.lineplot(
     data=plot_data,
@@ -137,12 +144,12 @@ sns.lineplot(
     hue='similarity_measure',
     style='similarity_measure',
     markers={
-        'kuncheva': 'o',           # Circle
-        'mwm': 's',                # Square
-        'global_spearman': 'D'     # Diamond
+        'kuncheva (top-5)': 'o',           # Circle
+        'mwm (top-5)': 's',                # Square
+        'spearman (global)': 'D'     # Diamond
     },
-    hue_order=["global_spearman", "kuncheva", "mwm"],
-    style_order=["global_spearman", "kuncheva", "mwm"]
+    hue_order=["spearman (global)", "kuncheva (top-5)", "mwm (top-5)"],
+    style_order=["spearman (global)", "kuncheva (top-5)", "mwm (top-5)"]
 )
 
 plt.xlabel("Feature Selection Method", fontweight='bold', labelpad=12) # Expanded label slightly
@@ -182,12 +189,18 @@ plot_data = stability_df[
 plot_data['fs_method'] = pd.Categorical(plot_data['fs_method'], categories=custom_order, ordered=True)
 plot_data['fs_method'] = plot_data['fs_method'].map(label_mapping)
 
+sim_mapping = {
+    "global_spearman": "spearman (global)",
+    "kuncheva": "kuncheva (top-5)",
+    "mwm": "mwm (top-5)"
+}
+plot_data['similarity_measure'] = plot_data['similarity_measure'].map(sim_mapping)
 
 # --- Plotting ---
 
-plt.figure(figsize=(16, 8))
+plt.figure(figsize=(20, 8))
 
-hue_order = ["global_spearman", "kuncheva", "mwm"]
+hue_order = ["spearman (global)", "kuncheva (top-5)", "mwm (top-5)"]
 
 # 1. Violin Plot: Structure maintained, now using refined colors
 sns.violinplot(
@@ -539,9 +552,9 @@ label_mapping = {
     "wrapper/SVC": "SBS+L-SVM",
     "wrapper/RandomForestClassifier": "SBS+RF",
     "wrapper/MLPClassifier": "SBS+MLP",
-    "filter/xval_contains_anomalies/singleAE":"singleAE", 
-    "filter/xval_contains_anomalies/bayesianAE": "bayesianAE", 
-    "filter/xval_contains_anomalies/ensembleAE": "ensembleAE"
+    "filter/singleAE":"singleAE", 
+    "filter/bayesianAE": "bayesianAE", 
+    "filter/ensembleAE": "ensembleAE"
 }
 
 pivot = pivot.reindex(FS_METHODS)
@@ -566,7 +579,7 @@ ax.set_xticklabels(pivot.columns, rotation=45, ha='right', fontsize=9)
 
 # Add labels and styling
 ax.set_xlabel("Top-5 Frequent Features", fontweight='bold', labelpad=12)
-ax.set_ylabel("FS Method", fontweight='bold', labelpad=12)
+ax.set_ylabel("Feature Selection Method", fontweight='bold', labelpad=12)
 # ax.set_title("Top Features Selected by Different Methods", fontsize=14)
 ax.grid(axis='y', linestyle='--', alpha=0.3)
 ax.tick_params(axis='both', which='major', length=0)
