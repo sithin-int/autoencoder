@@ -7,6 +7,9 @@ import pandas as pd
 from tqdm import tqdm
 import numpy as np
 
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 from sklearn.metrics import roc_auc_score
 
 ROOT_FOLDER_NAME = "autoencoder"
@@ -19,8 +22,8 @@ DATA_DIR = os.path.join(ROOT_DIR, "outputs")
 OUT_DIR = os.path.join(DATA_DIR, "analysis")
 
 RADIOMICS_DF = pd.read_csv(XL_PATH)
-#FS_METHODS = ["filter/mannwhitneyu", "filter/mutual_info_classif", "filter/mrmr_classif", "embedded/LASSO", "wrapper/LogisticRegression", "wrapper/SVC", "wrapper/RandomForestClassifier", "wrapper/MLPClassifier", "filter/singleAE", "filter/ensembleAE", "filter/bayesianAE"]
-FS_METHODS = ["filter/memory_allocated/singleAE", "filter/memory_allocated/bayesianAE", "filter/memory_allocated/ensembleAE"]
+FS_METHODS = ["filter/mannwhitneyu", "filter/mutual_info_classif", "filter/mrmr_classif", "embedded/LASSO", "wrapper/LogisticRegression", "wrapper/SVC", "wrapper/RandomForestClassifier", "wrapper/MLPClassifier", "filter/singleAE", "filter/ensembleAE", "filter/bayesianAE"]
+# FS_METHODS = ["filter/memory_allocated/singleAE", "filter/memory_allocated/bayesianAE", "filter/memory_allocated/ensembleAE"]
 
 SIMILARITY_METHODS= {"jaccard":similarity_index.jaccard, "dice":similarity_index.dice, "kuncheva":similarity_index.kuncheva, "mwm":similarity_index.mwm}
 
@@ -61,7 +64,7 @@ for fs_method in tqdm(["random"] + FS_METHODS):
 
             stability_df["fs_method"].append(fs_method)
             stability_df["similarity_measure"].append("global_spearman")
-            stability_df["top_k"].append("NA")
+            stability_df["top_k"].append(-1)
             stability_df["estimate"].append(estimate)
             stability_df["perturb_idx"].append(map_idx)
 
@@ -69,14 +72,197 @@ os.makedirs(OUT_DIR, exist_ok=True)
 stability_df = pd.DataFrame(stability_df)
 stability_df.to_csv(os.path.join(OUT_DIR, 'stability.csv'), index=False)
 
+#%%
 # Displaying mean stability estimates
 mean_stability_df = stability_df.groupby(by=["fs_method", "similarity_measure", "top_k"]).mean()
 
-for fs_method in FS_METHODS:
+for fs_method in ["random"] + FS_METHODS:
     print(f"{fs_method}")
     display(mean_stability_df.xs(fs_method, level="fs_method"))
     print("\n")
-                    
+
+#%%
+# Figure 1
+stability_df = pd.read_csv(os.path.join(OUT_DIR, 'stability.csv'))
+
+# Define the custom order and mapping
+custom_order = [
+    "random",
+    "filter/mannwhitneyu",
+    "filter/mutual_info_classif",
+    "filter/mrmr_classif",
+    "embedded/LASSO",
+    "wrapper/LogisticRegression",
+    "wrapper/SVC",
+    "wrapper/RandomForestClassifier",
+    "wrapper/MLPClassifier",
+    "filter/singleAE",
+    "filter/bayesianAE",
+    "filter/ensembleAE"
+]
+
+label_mapping = {
+    "random": "random",
+    "filter/mannwhitneyu": "WLCX",
+    "filter/mutual_info_classif": "MIM",
+    "filter/mrmr_classif": "MRMR",
+    "embedded/LASSO": "LASSO",
+    "wrapper/LogisticRegression": "SBS+LR",
+    "wrapper/SVC": "SBS+L-SVM",
+    "wrapper/RandomForestClassifier": "SBS+RF",
+    "wrapper/MLPClassifier": "SBS+MLP",
+    "filter/singleAE": "singleAE",
+    "filter/bayesianAE": "bayesianAE",
+    "filter/ensembleAE": "ensembleAE"
+}
+
+# Filter and map
+plot_data = stability_df[
+    (stability_df.similarity_measure.isin(["global_spearman", "kuncheva", "mwm"])) &
+    (stability_df.top_k.isin([-1, 5]))
+].copy()
+
+plot_data['fs_method'] = pd.Categorical(plot_data['fs_method'], categories=custom_order, ordered=True)
+plot_data['fs_method'] = plot_data['fs_method'].map(label_mapping)
+
+
+plt.figure(figsize=(12, 6))
+
+sns.lineplot(
+    data=plot_data,
+    x='fs_method',
+    y='estimate',
+    errorbar='sd',
+    marker='o',
+    hue='similarity_measure',
+    style='similarity_measure',
+    markers={
+        'kuncheva': 'o',           # Circle
+        'mwm': 's',                # Square
+        'global_spearman': 'D'     # Diamond
+    },
+    hue_order=["global_spearman", "kuncheva", "mwm"],
+    style_order=["global_spearman", "kuncheva", "mwm"]
+)
+
+plt.xlabel("Feature Selection Method", fontweight='bold', labelpad=12) # Expanded label slightly
+plt.ylabel("Stability Estimate", fontweight='bold', labelpad=12)
+
+
+plt.legend()
+plt.tight_layout()
+
+plt.savefig(os.path.join(OUT_DIR, "stability_plot.tif"), format="tiff", dpi=600)
+
+plt.show()
+
+#%%
+# Figure 1 detailed
+custom_order = [
+    "random", "filter/mannwhitneyu", "filter/mutual_info_classif",
+    "filter/mrmr_classif", "embedded/LASSO", "wrapper/LogisticRegression",
+    "wrapper/SVC", "wrapper/RandomForestClassifier", "wrapper/MLPClassifier",
+    "filter/singleAE", "filter/bayesianAE", "filter/ensembleAE"
+]
+
+label_mapping = {
+    "random": "random", "filter/mannwhitneyu": "WLCX",
+    "filter/mutual_info_classif": "MIM", "filter/mrmr_classif": "MRMR",
+    "embedded/LASSO": "LASSO", "wrapper/LogisticRegression": "SBS+LR",
+    "wrapper/SVC": "SBS+L-SVM", "wrapper/RandomForestClassifier": "SBS+RF",
+    "wrapper/MLPClassifier": "SBS+MLP", "filter/singleAE": "singleAE",
+    "filter/bayesianAE": "bayesianAE", "filter/ensembleAE": "ensembleAE"
+}
+
+plot_data = stability_df[
+    (stability_df.similarity_measure.isin(["global_spearman", "kuncheva", "mwm"])) &
+    (stability_df.top_k.isin([-1, 5]))
+].copy()
+
+plot_data['fs_method'] = pd.Categorical(plot_data['fs_method'], categories=custom_order, ordered=True)
+plot_data['fs_method'] = plot_data['fs_method'].map(label_mapping)
+
+
+# --- Plotting ---
+
+plt.figure(figsize=(16, 8))
+
+hue_order = ["global_spearman", "kuncheva", "mwm"]
+
+# 1. Violin Plot: Structure maintained, now using refined colors
+sns.violinplot(
+    data=plot_data,
+    x='fs_method',
+    y='estimate',
+    hue='similarity_measure',
+    hue_order=hue_order,
+    inner=None,               # decluttered center
+    cut=0,            
+    linewidth=1,            
+    density_norm="width", 
+    alpha=0.5                 # soft violins
+)
+
+# 2. Stripplot: Points pop cleanly against new colors
+sns.stripplot(
+    data=plot_data,
+    x='fs_method',
+    y='estimate',
+    hue='similarity_measure',
+    hue_order=hue_order,
+    dodge=True,       
+    alpha=0.9,                # vibrant points
+    jitter=True,      
+    legend=False,
+    size=4.5,               
+    linewidth=0.6,          
+    edgecolor="white",        # critical white border
+    zorder=2                
+)
+
+sns.pointplot(
+    data=plot_data,
+    x='fs_method',
+    y='estimate',
+    hue='similarity_measure',
+    hue_order=hue_order,
+    markers = ['D', 'o', 's'],
+    linestyles=['-', '--', ':'],
+    estimator='mean',          
+    errorbar=None,             
+    dodge=0.533,               # <--- FIXED: Mathematical dodge value for 3 hues
+    linewidth=2.5,             
+    markeredgecolor='white',   
+    markeredgewidth=1.5,
+    zorder=3,                  
+    legend=False               
+)
+
+# --- 4. Aesthetics & Cleanup ---
+plt.xlabel("Feature Selection Method", fontweight='bold', labelpad=12) # Expanded label slightly
+plt.ylabel("Stability Estimate", fontweight='bold', labelpad=12)
+
+# plt.xticks(rotation=45, ha='right')
+
+# Legend: removed redundant borders and simplified title
+handles, labels = plt.gca().get_legend_handles_labels()
+plt.legend(
+    handles[:3], 
+    labels[:3], 
+    title='Stability Metric',  # Made title more precise
+    bbox_to_anchor=(1.02, 1), 
+    loc='upper left',
+    frameon=False
+)
+
+# Remove unneeded chart boundaries
+sns.despine()
+
+plt.tight_layout()
+
+plt.savefig(os.path.join(OUT_DIR, "stability_plot_violin.tif"), format="tiff", dpi=600, bbox_inches="tight")
+plt.show()
+
 #%%
 # Time and Memory Usage
 
