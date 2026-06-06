@@ -425,7 +425,7 @@ import matplotlib.pyplot as plt
 
 
 # Seaborn styling for a cleaner look
-sns.set(style="whitegrid", context="notebook", font_scale=1.1)
+# sns.set(style="whitegrid", context="notebook", font_scale=1.1)
 df_exploded = selected_feats_df.explode("selected_feats").reset_index(drop=True)
 # Pivot table creation (as you already did)
 pivot = pd.crosstab(df_exploded["fs_method"], df_exploded["selected_feats"])
@@ -469,15 +469,15 @@ ax.set_xticks(range(len(pivot.columns)))
 ax.set_xticklabels(pivot.columns, rotation=45, ha='right', fontsize=9)
 
 # Add labels and styling
-ax.set_xlabel("Radiomics Features", fontsize=12)
-ax.set_ylabel("Feature Selection Method", fontsize=12)
+ax.set_xlabel("Top-5 Selected Features", fontweight='bold', labelpad=12)
+ax.set_ylabel("Feature Selection Method", fontweight='bold', labelpad=12)
 # ax.set_title("Top Features Selected by Different Methods", fontsize=14)
 ax.grid(axis='y', linestyle='--', alpha=0.3)
 ax.tick_params(axis='both', which='major', length=0)
 
 plt.tight_layout()
 
-# plt.savefig("freq_plot.tif", format="tiff", dpi=600)
+plt.savefig(os.path.join(OUT_DIR, "signatures.tif"), format="tiff", dpi=600)
 
 
 plt.show()
@@ -565,15 +565,15 @@ ax.set_xticks(range(len(pivot.columns)))
 ax.set_xticklabels(pivot.columns, rotation=45, ha='right', fontsize=9)
 
 # Add labels and styling
-ax.set_xlabel("Top Frequent Features", fontsize=12)
-ax.set_ylabel("FS Method", fontsize=12)
+ax.set_xlabel("Top-5 Frequent Features", fontweight='bold', labelpad=12)
+ax.set_ylabel("FS Method", fontweight='bold', labelpad=12)
 # ax.set_title("Top Features Selected by Different Methods", fontsize=14)
 ax.grid(axis='y', linestyle='--', alpha=0.3)
 ax.tick_params(axis='both', which='major', length=0)
 
 plt.tight_layout()
 
-# plt.savefig("freq_plot.tif", format="tiff", dpi=600)
+plt.savefig(os.path.join(OUT_DIR, "frequent_feats.tif"), format="tiff", dpi=600)
 
 
 plt.show()
