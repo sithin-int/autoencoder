@@ -1,4 +1,7 @@
 #%%
+%load_ext autoreload
+%autoreload 2
+
 import os
 import sys
 from pathlib import Path
@@ -32,6 +35,7 @@ TOP_K_LIST = [5, 10, 15, 20, 25]
 
 
 #%%
+# Stability Analysis
 stability_df = {"fs_method":[], "similarity_measure":[], "top_k":[], "estimate":[], "perturb_idx":[]}
 
 for fs_method in tqdm(["random"] + FS_METHODS):
@@ -74,6 +78,7 @@ stability_df.to_csv(os.path.join(OUT_DIR, 'stability.csv'), index=False)
 
 #%%
 # Displaying mean stability estimates
+
 mean_stability_df = stability_df.groupby(by=["fs_method", "similarity_measure", "top_k"]).mean()
 
 for fs_method in ["random"] + FS_METHODS:
@@ -82,7 +87,43 @@ for fs_method in ["random"] + FS_METHODS:
     print("\n")
 
 #%%
-# Figure 1
+# Deep dive in LASSO feature selection
+stability_df = pd.read_csv(os.path.join(OUT_DIR, 'stability.csv'))
+lasso_df = {"coef":[], "f1_count":[], "f2_count":[], "overlap_count":[], "estimate":[], "perturb_idx":[]}
+
+fs_method = "embedded/LASSO"
+
+for i in range(NUM_DATA_PERTURBATIONS):
+        for j in range(i+1, NUM_DATA_PERTURBATIONS):
+            
+            dict1 = np.load(os.path.join(DATA_DIR, fs_method, f"{i+1}.npz"), allow_pickle=True)
+            dict2 = np.load(os.path.join(DATA_DIR, fs_method, f"{j+1}.npz"), allow_pickle=True)
+            
+            map_idx = (i * NUM_DATA_PERTURBATIONS) + j # to map the tuple (i,j) to a unique integer
+            
+            df1 = pd.DataFrame(dict1["rank_dict"].item())
+            df2 = pd.DataFrame(dict2["rank_dict"].item())
+
+            for coef_filter in ["all", "non-zero", "zero"]:
+
+                df1_temp = df1[df1.absolute_coef != 0].copy() if coef_filter == "non-zero" else (df1[df1.absolute_coef == 0].copy() if coef_filter == "zero" else df1.copy())
+                df2_temp = df2[df2.absolute_coef != 0].copy() if coef_filter == "non-zero" else (df2[df2.absolute_coef == 0].copy() if coef_filter == "zero" else df2.copy())
+
+                estimate = similarity_index.global_spearman(df1_temp, df2_temp, ignore_cardinality=True)
+                
+                lasso_df["coef"].append(coef_filter)
+                lasso_df["f1_count"].append(len(df1_temp))
+                lasso_df["f2_count"].append(len(df2_temp))
+                lasso_df["overlap_count"].append(len(df1_temp[df1_temp.feature.isin(df2_temp.feature)]))
+                lasso_df["estimate"].append(estimate)
+                lasso_df["perturb_idx"].append(map_idx)
+
+ 
+display(pd.DataFrame(lasso_df).groupby(by=["coef"]).mean())
+
+
+#%%
+# Figure 1 visualizing mean stability characteristics
 stability_df = pd.read_csv(os.path.join(OUT_DIR, 'stability.csv'))
 
 # Define the custom order and mapping
@@ -164,7 +205,7 @@ plt.savefig(os.path.join(OUT_DIR, "stability_plot.tif"), format="tiff", dpi=600)
 plt.show()
 
 #%%
-# Figure 1 detailed
+# Figure 1 detailed stability distribution plots
 custom_order = [
     "random", "filter/mannwhitneyu", "filter/mutual_info_classif",
     "filter/mrmr_classif", "embedded/LASSO", "wrapper/LogisticRegression",
