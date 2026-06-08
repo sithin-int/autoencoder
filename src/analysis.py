@@ -121,6 +121,169 @@ for i in range(NUM_DATA_PERTURBATIONS):
  
 display(pd.DataFrame(lasso_df).groupby(by=["coef"]).mean())
 
+# #%%
+# # Pie charts: feature overlap breakdown for each coef_filter
+# lasso_df_summary = pd.DataFrame(lasso_df)
+# lasso_df_agg = lasso_df_summary.groupby("coef")[["f1_count", "f2_count", "overlap_count"]].mean()
+
+# fig, ax = plt.subplots(figsize=(7, 5))
+
+# coef_order = ["all", "non-zero", "zero"]
+# x_labels = ["All", "Non-zero", "Zero"]
+# gray_palette = {"Only in f₁": "#2b2b2b", "Overlap": "#888888", "Only in f₂": "#d0d0d0"}
+
+# only_f1_vals, overlap_vals, only_f2_vals = [], [], []
+
+# for coef_filter in coef_order:
+#     row = lasso_df_agg.loc[coef_filter]
+#     overlap = row["overlap_count"]
+#     only_f1_vals.append(row["f1_count"] - overlap)
+#     overlap_vals.append(overlap)
+#     only_f2_vals.append(row["f2_count"] - overlap)
+
+# x = range(len(coef_order))
+
+# bars1 = ax.bar(x, only_f1_vals, label="Only in f₁", color=gray_palette["Only in f₁"], edgecolor="white", linewidth=0.8)
+# bars2 = ax.bar(x, overlap_vals,  label="Overlap",    color=gray_palette["Overlap"],    edgecolor="white", linewidth=0.8, bottom=only_f1_vals)
+# bars3 = ax.bar(x, only_f2_vals,  label="Only in f₂", color=gray_palette["Only in f₂"], edgecolor="white", linewidth=0.8,
+#                bottom=[a + b for a, b in zip(only_f1_vals, overlap_vals)])
+
+# # Annotate each segment with its value
+# for bars, bottoms in [(bars1, [0]*3), (bars2, only_f1_vals), (bars3, [a+b for a,b in zip(only_f1_vals, overlap_vals)])]:
+#     for bar, bot in zip(bars, bottoms):
+#         h = bar.get_height()
+#         if h > 1:  # only label if segment is big enough to read
+#             ax.text(
+#                 bar.get_x() + bar.get_width() / 2,
+#                 bot + h / 2,
+#                 f"{h:.0f}",
+#                 ha="center", va="center",
+#                 fontsize=9, color="white", fontweight="bold"
+#             )
+
+# ax.set_xticks(list(x))
+# ax.set_xticklabels(x_labels)
+# ax.set_xlabel("Coefficient Filter", fontweight="bold", labelpad=10)
+# ax.set_ylabel("Mean Feature Count\n(across perturbation pairs)", fontweight="bold", labelpad=10)
+# ax.legend(loc="upper right", frameon=False)
+# sns.despine(ax=ax)
+
+# plt.suptitle("LASSO Feature Overlap by Coefficient Filter", fontweight="bold", y=1.01)
+# plt.tight_layout()
+# plt.savefig(os.path.join(OUT_DIR, "lasso_overlap_bar.tif"), format="tiff", dpi=300, bbox_inches="tight")
+# plt.show()
+
+# #%%
+# # Grouped bar chart: mean feature count vs overlap per coef filter
+# fig, ax = plt.subplots(figsize=(7, 5))
+
+# width = 0.3
+# offsets = [-width / 2, width / 2]  # two bars per group
+
+# group_vals = {
+#     "All Features":  [(lasso_df_agg.loc[c, "f1_count"] + lasso_df_agg.loc[c, "f2_count"]) / 2 for c in coef_order],
+#     "Common Features": [lasso_df_agg.loc[c, "overlap_count"] for c in coef_order],
+# }
+
+# x = np.arange(len(coef_order))
+
+# for offset, (label, vals) in zip(offsets, group_vals.items()):
+#     bars = ax.bar(x + offset, vals, width=width, label=label,
+#                   edgecolor="white", linewidth=0.8)
+#     for bar, v in zip(bars, vals):
+#         ax.text(
+#             bar.get_x() + bar.get_width() / 2,
+#             bar.get_height() + 0.5,
+#             f"{v:.0f}",
+#             ha="center", va="bottom",
+#             fontsize=8, color="black"
+#         )
+
+# ax.set_xticks(x)
+# ax.set_xticklabels(["All", "Non-zero", "Zero"])
+# ax.set_xlabel("Coefficient Filter", fontweight="bold", labelpad=10)
+# ax.set_ylabel("Mean Count\n(across perturbation pairs)", fontweight="bold", labelpad=10)
+# ax.legend(frameon=False)
+# sns.despine(ax=ax)
+
+# plt.suptitle("LASSO Selection Output Stratified by Coefficient Filter", fontweight="bold", y=1.01)
+# plt.tight_layout()
+# plt.savefig(os.path.join(OUT_DIR, "lasso_overlap_grouped_bar.tif"), format="tiff", dpi=300, bbox_inches="tight")
+# plt.show()
+
+
+#%%
+# Combined: grouped bar chart (left) + stability estimate distribution (right)
+lasso_df_summary = pd.DataFrame(lasso_df)
+lasso_df_agg = lasso_df_summary.groupby("coef")[["f1_count", "f2_count", "overlap_count"]].mean()
+
+coef_order = ["all", "non-zero", "zero"]
+
+lasso_df_plot = pd.DataFrame(lasso_df)
+coef_label_map = {"all": "All", "non-zero": "Non-Zero", "zero": "Zero"}
+lasso_df_plot["coef_label"] = lasso_df_plot["coef"].map(coef_label_map)
+coef_label_order = ["All", "Non-Zero", "Zero"]
+
+fig, (ax_bar, ax_dist) = plt.subplots(1, 2, figsize=(13, 5))
+
+# --- Left: Grouped bar chart ---
+width = 0.3
+offsets = [-width / 2, width / 2]
+group_vals_combined = {
+    "All Features":    [(lasso_df_agg.loc[c, "f1_count"] + lasso_df_agg.loc[c, "f2_count"]) / 2 for c in coef_order],
+    "Overlapped Features": [lasso_df_agg.loc[c, "overlap_count"] for c in coef_order],
+}
+x = np.arange(len(coef_order))
+bar_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+for (offset, (label, vals)), color in zip(zip(offsets, group_vals_combined.items()), bar_colors):
+    bars = ax_bar.bar(x + offset, vals, width=width, label=label,
+                      color=color, edgecolor="white", linewidth=0.8)
+    for bar, v in zip(bars, vals):
+        ax_bar.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.5,
+            f"{v:.0f}",
+            ha="center", va="bottom", fontsize=8, color="black"
+        )
+
+ax_bar.set_xticks(x)
+ax_bar.set_xticklabels(["All", "Non-Zero", "Zero"])
+ax_bar.set_xlabel("LASSO Coefficients", fontweight="bold", labelpad=10)
+ax_bar.set_ylabel("Mean Count\n(across perturbation pairs)", fontweight="bold", labelpad=10)
+ax_bar.legend(frameon=False)
+sns.despine(ax=ax_bar)
+
+# --- Right: Stability estimate distribution per coef filter ---
+sns.violinplot(
+    data=lasso_df_plot, x="coef_label", y="estimate",
+    order=coef_label_order, inner=None, cut=0,
+    linewidth=1, density_norm="width", alpha=0.5, ax=ax_dist
+)
+sns.stripplot(
+    data=lasso_df_plot, x="coef_label", y="estimate",
+    order=coef_label_order, color="black", alpha=0.15,
+    size=2.5, jitter=0.12, ax=ax_dist, zorder=2
+)
+# Mean marker: diamond per group, drawn on top
+means = lasso_df_plot.groupby("coef_label")["estimate"].mean()
+for i, coef_label in enumerate(coef_label_order):
+    ax_dist.scatter(i, means[coef_label], marker="D", color="white",
+                    edgecolors="black", linewidths=1.5,
+                    s=20, zorder=6, label="Mean" if i == 0 else None)
+ax_dist.legend(frameon=False, fontsize=8)
+
+
+ax_dist.set_xlabel("LASSO Coefficients", fontweight="bold", labelpad=10)
+ax_dist.set_ylabel("Spearman Correlation (global)", fontweight="bold", labelpad=10)
+sns.despine(ax=ax_dist)
+
+# plt.suptitle("LASSO: Feature Selection Output & Stability by Coefficient Filter",
+#              fontweight="bold", y=1.01)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT_DIR, "lasso_deepdive.tif"), format="tiff", dpi=300, bbox_inches="tight")
+plt.show()
+
 
 #%%
 # Figure 1 visualizing mean stability characteristics
