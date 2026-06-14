@@ -78,7 +78,7 @@ stability_df.to_csv(os.path.join(OUT_DIR, 'stability.csv'), index=False)
 
 #%%
 # Displaying mean stability estimates
-
+stability_df = pd.read_csv(os.path.join(OUT_DIR, 'stability.csv'))
 mean_stability_df = stability_df.groupby(by=["fs_method", "similarity_measure", "top_k"]).mean()
 
 for fs_method in ["random"] + FS_METHODS:
@@ -120,6 +120,77 @@ for i in range(NUM_DATA_PERTURBATIONS):
 
  
 display(pd.DataFrame(lasso_df).groupby(by=["coef"]).mean())
+
+lasso_df_summary = pd.DataFrame(lasso_df)
+lasso_df_agg = lasso_df_summary.groupby("coef")[["f1_count", "f2_count", "overlap_count"]].mean()
+
+coef_order = ["all", "non-zero", "zero"]
+
+lasso_df_plot = pd.DataFrame(lasso_df)
+coef_label_map = {"all": "All", "non-zero": "Non-Zero", "zero": "Zero"}
+lasso_df_plot["coef_label"] = lasso_df_plot["coef"].map(coef_label_map)
+coef_label_order = ["All", "Non-Zero", "Zero"]
+
+fig, (ax_bar, ax_dist) = plt.subplots(1, 2, figsize=(13, 5))
+
+# --- Left: Grouped bar chart ---
+width = 0.3
+offsets = [-width / 2, width / 2]
+group_vals_combined = {
+    "All Features":    [(lasso_df_agg.loc[c, "f1_count"] + lasso_df_agg.loc[c, "f2_count"]) / 2 for c in coef_order],
+    "Overlapped Features": [lasso_df_agg.loc[c, "overlap_count"] for c in coef_order],
+}
+x = np.arange(len(coef_order))
+bar_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+for (offset, (label, vals)), color in zip(zip(offsets, group_vals_combined.items()), bar_colors):
+    bars = ax_bar.bar(x + offset, vals, width=width, label=label,
+                      color=color, edgecolor="white", linewidth=0.8)
+    for bar, v in zip(bars, vals):
+        ax_bar.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.5,
+            f"{v:.0f}",
+            ha="center", va="bottom", fontsize=8, color="black"
+        )
+
+ax_bar.set_xticks(x)
+ax_bar.set_xticklabels(["All", "Non-Zero", "Zero"])
+ax_bar.set_xlabel("LASSO Coefficients", fontweight="bold", labelpad=10)
+ax_bar.set_ylabel("Mean Count\n(across perturbation pairs)", fontweight="bold", labelpad=10)
+ax_bar.legend(frameon=False)
+sns.despine(ax=ax_bar)
+
+# --- Right: Stability estimate distribution per coef filter ---
+sns.violinplot(
+    data=lasso_df_plot, x="coef_label", y="estimate",
+    order=coef_label_order, inner=None, cut=0,
+    linewidth=1, density_norm="width", alpha=0.5, ax=ax_dist
+)
+sns.stripplot(
+    data=lasso_df_plot, x="coef_label", y="estimate",
+    order=coef_label_order, color="black", alpha=0.15,
+    size=2.5, jitter=0.12, ax=ax_dist, zorder=2
+)
+# Mean marker: diamond per group, drawn on top
+means = lasso_df_plot.groupby("coef_label")["estimate"].mean()
+for i, coef_label in enumerate(coef_label_order):
+    ax_dist.scatter(i, means[coef_label], marker="D", color="white",
+                    edgecolors="black", linewidths=1.5,
+                    s=20, zorder=6, label="Mean" if i == 0 else None)
+ax_dist.legend(frameon=False, fontsize=8)
+
+
+ax_dist.set_xlabel("LASSO Coefficients", fontweight="bold", labelpad=10)
+ax_dist.set_ylabel("Spearman Correlation (global)", fontweight="bold", labelpad=10)
+sns.despine(ax=ax_dist)
+
+# plt.suptitle("LASSO: Feature Selection Output & Stability by Coefficient Filter",
+#              fontweight="bold", y=1.01)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT_DIR, "lasso_deepdive.tif"), format="tiff", dpi=300, bbox_inches="tight")
+plt.show()
+
 
 # #%%
 # # Pie charts: feature overlap breakdown for each coef_filter
@@ -211,15 +282,49 @@ display(pd.DataFrame(lasso_df).groupby(by=["coef"]).mean())
 # plt.savefig(os.path.join(OUT_DIR, "lasso_overlap_grouped_bar.tif"), format="tiff", dpi=300, bbox_inches="tight")
 # plt.show()
 
-
-#%%
 # Combined: grouped bar chart (left) + stability estimate distribution (right)
-lasso_df_summary = pd.DataFrame(lasso_df)
-lasso_df_agg = lasso_df_summary.groupby("coef")[["f1_count", "f2_count", "overlap_count"]].mean()
+
+#%% Deep dive into MIM
+
+mim_df = {"coef":[], "f1_count":[], "f2_count":[], "overlap_count":[], "estimate":[], "perturb_idx":[]}
+
+fs_method = "filter/mutual_info_classif"
+
+for i in range(NUM_DATA_PERTURBATIONS):
+        for j in range(i+1, NUM_DATA_PERTURBATIONS):
+            
+            dict1 = np.load(os.path.join(DATA_DIR, fs_method, f"{i+1}.npz"), allow_pickle=True)
+            dict2 = np.load(os.path.join(DATA_DIR, fs_method, f"{j+1}.npz"), allow_pickle=True)
+            
+            map_idx = (i * NUM_DATA_PERTURBATIONS) + j # to map the tuple (i,j) to a unique integer
+            
+            df1 = pd.DataFrame(dict1["rank_dict"].item())
+            df2 = pd.DataFrame(dict2["rank_dict"].item())
+
+
+            for coef_filter in ["all", "non-zero", "zero"]:
+
+                df1_temp = df1[df1.score != 0].copy() if coef_filter == "non-zero" else (df1[df1.score == 0].copy() if coef_filter == "zero" else df1.copy())
+                df2_temp = df2[df2.score != 0].copy() if coef_filter == "non-zero" else (df2[df2.score == 0].copy() if coef_filter == "zero" else df2.copy())
+
+                estimate = similarity_index.global_spearman(df1_temp, df2_temp, ignore_cardinality=True)
+                
+                mim_df["coef"].append(coef_filter)
+                mim_df["f1_count"].append(len(df1_temp))
+                mim_df["f2_count"].append(len(df2_temp))
+                mim_df["overlap_count"].append(len(df1_temp[df1_temp.feature.isin(df2_temp.feature)]))
+                mim_df["estimate"].append(estimate)
+                mim_df["perturb_idx"].append(map_idx)
+
+ 
+display(pd.DataFrame(mim_df).groupby(by=["coef"]).mean())
+
+mim_df_summary = pd.DataFrame(mim_df)
+mim_df_agg = mim_df_summary.groupby("coef")[["f1_count", "f2_count", "overlap_count"]].mean()
 
 coef_order = ["all", "non-zero", "zero"]
 
-lasso_df_plot = pd.DataFrame(lasso_df)
+mim_df_plot = pd.DataFrame(mim_df)
 coef_label_map = {"all": "All", "non-zero": "Non-Zero", "zero": "Zero"}
 lasso_df_plot["coef_label"] = lasso_df_plot["coef"].map(coef_label_map)
 coef_label_order = ["All", "Non-Zero", "Zero"]
@@ -249,7 +354,7 @@ for (offset, (label, vals)), color in zip(zip(offsets, group_vals_combined.items
 
 ax_bar.set_xticks(x)
 ax_bar.set_xticklabels(["All", "Non-Zero", "Zero"])
-ax_bar.set_xlabel("LASSO Coefficients", fontweight="bold", labelpad=10)
+ax_bar.set_xlabel("Mutual Information", fontweight="bold", labelpad=10)
 ax_bar.set_ylabel("Mean Count\n(across perturbation pairs)", fontweight="bold", labelpad=10)
 ax_bar.legend(frameon=False)
 sns.despine(ax=ax_bar)
@@ -274,16 +379,15 @@ for i, coef_label in enumerate(coef_label_order):
 ax_dist.legend(frameon=False, fontsize=8)
 
 
-ax_dist.set_xlabel("LASSO Coefficients", fontweight="bold", labelpad=10)
+ax_dist.set_xlabel("Mutual Information", fontweight="bold", labelpad=10)
 ax_dist.set_ylabel("Spearman Correlation (global)", fontweight="bold", labelpad=10)
 sns.despine(ax=ax_dist)
 
-# plt.suptitle("LASSO: Feature Selection Output & Stability by Coefficient Filter",
+# plt.suptitle("MIM: Feature Selection Output & Stability by Coefficient Filter",
 #              fontweight="bold", y=1.01)
 plt.tight_layout()
-plt.savefig(os.path.join(OUT_DIR, "lasso_deepdive.tif"), format="tiff", dpi=300, bbox_inches="tight")
+plt.savefig(os.path.join(OUT_DIR, "mim_deepdive.tif"), format="tiff", dpi=300, bbox_inches="tight")
 plt.show()
-
 
 #%%
 # Figure 1 visualizing mean stability characteristics
@@ -701,7 +805,7 @@ plt.show()
 
 
 #%%
-# Identifying the frequent features
+# Identifying the top-5 frequent features
 
 top_k = 5
 frequent_feats_df = {"fs_method":[], "frequent_feats":[]}
@@ -795,8 +899,230 @@ plt.savefig(os.path.join(OUT_DIR, "frequent_feats.tif"), format="tiff", dpi=600)
 
 plt.show()
 
+#%%
+# comparing frequent and selected features
+
+fs_families = {
+    "filter/mannwhitneyu": ["filter/mannwhitneyu"],
+    "filter/mrmr_classif": ["filter/mrmr_classif"],
+    "filter/mutual_info_classif": ["filter/mutual_info_classif"],
+    "embedded": ["embedded/LASSO"],
+    "wrapper/LogisticRegression": ["wrapper/LogisticRegression"],
+    "wrapper/SVC": ["wrapper/SVC"],
+    "wrapper/RandomForestClassifier": ["wrapper/RandomForestClassifier"],
+    "wrapper/MLPClassifier": ["wrapper/MLPClassifier"],
+    "filter/singleAE": ["filter/singleAE"],
+    "filter/bayesianAE": ["filter/bayesianAE"],
+    "filter/ensembleAE": ["filter/ensembleAE"],
+    "filter": ["filter/mannwhitneyu", "filter/mrmr_classif", "filter/mutual_info_classif"],
+    "filter_wlcx_vs_mrmr":["filter/mannwhitneyu", "filter/mrmr_classif"],
+    "wrapper": ["wrapper/LogisticRegression", "wrapper/SVC", "wrapper/RandomForestClassifier", "wrapper/MLPClassifier"],
+    "wrapper_linear":["wrapper/LogisticRegression", "wrapper/SVC"],
+    "wrapper_non_linear":["wrapper/RandomForestClassifier", "wrapper/MLPClassifier"],
+    "ae": ["filter/singleAE", "filter/bayesianAE", "filter/ensembleAE"],
+    "ae_single_vs_bayesian": ["filter/singleAE", "filter/bayesianAE"],
+    "ae_bayesian_vs_ensemble": ["filter/bayesianAE", "filter/ensembleAE"],
+    "ae_single_vs_ensemble": ["filter/singleAE", "filter/ensembleAE"],
+    "lasso_vs_lsvm": ["embedded/LASSO", "wrapper/SVC"]
+}
+
+for family, fs_methods in fs_families.items():
+    frequent_feats = []
+    for fs_method in fs_methods:
+        frequent_feats.append(set(frequent_feats_df[frequent_feats_df.fs_method==fs_method].frequent_feats.iloc[0]))
+
+    overlap_freq_feats = set.intersection(*frequent_feats)
+    frequent_feats = list(set.union(*frequent_feats))
+    
+    selected_feats = []
+    for fs_method in fs_methods:
+        selected_feats.append(set(selected_feats_df[selected_feats_df.fs_method==fs_method].selected_feats.iloc[0]))
+
+    overlap_selected_feats = set.intersection(*selected_feats)
+    selected_feats = list(set.union(*selected_feats))
+    
+    common_feats = overlap_freq_feats.intersection(overlap_selected_feats)
+    print("*"*5)
+    print(f"Family: {family}")
+    print(f"Selected Features: {len(overlap_selected_feats)}")
+    print(f"Frequent Features: {len(overlap_freq_feats)}")
+    print(f"Common Features: {len(common_feats)}")
+
+#%%
+# Correlation Analysis
+
+import itertools
+from scipy.optimize import linear_sum_assignment
+
+def mwm(signature_dict, feats_df, corr_method='spearman'):
+    
+    fs_methods, signatures = zip(*signature_dict.items())
+    
+    df = pd.DataFrame(np.zeros((len(fs_methods), len(fs_methods))), index=fs_methods, columns=fs_methods)
+    
+    fs_methods = list(fs_methods)
+    signatures = list(signatures)
+
+    f = list(set(sum(signatures, [])))
+    corr_matrix = feats_df[f].corr(method=corr_method).abs()
+    
+    pairs = list(itertools.product(fs_methods, repeat=2))
+    
+    for fs_method1, fs_method2 in pairs:
+        
+        
+        f1_k, f2_k = signature_dict[fs_method1], signature_dict[fs_method2]
+        cost_matrix = corr_matrix.loc[f1_k, f2_k]
+        
+        row_ind, col_ind = linear_sum_assignment(cost_matrix, maximize=True)
+        
+        cost = cost_matrix.values[row_ind, col_ind].sum()/len(f1_k)
+        
+        df.loc[fs_method1, fs_method2] = cost
+
+    return df
 
 
+for df_type, df in {"selected_feats":selected_feats_df, "frequent_feats":frequent_feats_df}.items():
+    
+    corr_dfs = {}
+    for corr_method in ["pearson", "spearman"]:
+        fs_methods = df.fs_method.to_list()
+        top_feats = df[df_type].to_list()
+        signature_dict = dict(zip(fs_methods, top_feats))
+
+        corr_df = mwm(signature_dict, RADIOMICS_DF, corr_method=corr_method).abs()
+        corr_dfs[corr_method] = corr_df
+        
+
+    label_mapping = {
+        "filter/mannwhitneyu":"WLCX",
+        "filter/mrmr_classif":"MRMR",
+        "filter/mutual_info_classif":"MIM",
+        "embedded/LASSO":"LASSO",
+        "wrapper/LogisticRegression": "SBS+LR",
+        "wrapper/SVC": "SBS+L-SVM",
+        "wrapper/RandomForestClassifier": "SBS+RF",
+        "wrapper/MLPClassifier": "SBS+MLP",
+        "filter/singleAE":"singleAE", 
+        "filter/bayesianAE": "bayesianAE", 
+        "filter/ensembleAE": "ensembleAE"
+    }
+
+    pearson_corr_df = corr_dfs["pearson"].rename(index=label_mapping, columns=label_mapping)
+    spearman_corr_df = corr_dfs["spearman"].rename(index=label_mapping, columns=label_mapping)
+
+    fig, axes = plt.subplots(1, 2, figsize=(20, 8))
+
+    # Define a beautiful colormap
+    cmap = sns.diverging_palette(220, 10, as_cmap=True)
+
+    ax1 = axes[0]
+    hm1 = sns.heatmap(
+        pearson_corr_df, cmap=cmap, square=True, linewidth=0.5, cbar=False, 
+        vmin=0, vmax=1, annot = True, fmt=".2f", annot_kws={"size":10}, ax=ax1 #cbar_kws={'shrink': 0.75}, 
+    )
+    ax1.set_title("Pearson Correlation")
+
+    # --- Right: Spearman ---
+    ax2 = axes[1]
+    hm2 = sns.heatmap(
+        spearman_corr_df, cmap=cmap, square=True, linewidth=0.5, cbar=False, 
+        vmin=0, vmax=1, annot = True, fmt=".2f", annot_kws={"size":10}, ax=ax2
+    )
+
+    cbar = fig.colorbar(hm2.collections[0], ax=ax2, shrink=0.75, location='right')
+
+    ax2.set_title("Spearman Correlation")
+
+    plt.tight_layout()
+
+    plt.savefig(os.path.join(OUT_DIR, f"{df_type}_corr_plot.tif"), format="tiff", dpi=600)
+
+    plt.show()
+
+#%%
+
+_selected_feats_df = selected_feats_df.copy()
+_selected_feats_df = _selected_feats_df.rename(columns={"selected_feats": "features"})
+_selected_feats_df["fs_method"] = ["top-5_"+fs_method for fs_method in _selected_feats_df["fs_method"]]
+
+_frequent_feats_df = frequent_feats_df.copy()
+_frequent_feats_df = _frequent_feats_df.rename(columns={"frequent_feats": "features"})
+_frequent_feats_df["fs_method"] = ["frequent_top-5_"+fs_method for fs_method in _frequent_feats_df["fs_method"]]
+combined_df = pd.concat([_selected_feats_df, _frequent_feats_df], axis=0)
+
+corr_dfs = {}
+for corr_method in ["pearson", "spearman"]:
+    fs_methods = combined_df.fs_method.to_list()
+    top_feats = combined_df.features.to_list()
+    signature_dict = dict(zip(fs_methods, top_feats))
+
+    corr_df = mwm(signature_dict, RADIOMICS_DF, corr_method=corr_method).abs()
+    corr_dfs[corr_method] = corr_df
+        
+
+    label_mapping = {
+        "top-5_filter/mannwhitneyu":"top-5 WLCX",
+        "top-5_filter/mrmr_classif":"top-5 MRMR",
+        "top-5_filter/mutual_info_classif":"top-5 MIM",
+        "top-5_embedded/LASSO":"top-5 LASSO",
+        "top-5_wrapper/LogisticRegression": "top-5 SBS+LR",
+        "top-5_wrapper/SVC": "top-5 SBS+L-SVM",
+        "top-5_wrapper/RandomForestClassifier": "top-5 SBS+RF",
+        "top-5_wrapper/MLPClassifier": "top-5 SBS+MLP",
+        "top-5_filter/singleAE":"top-5 singleAE", 
+        "top-5_filter/bayesianAE": "top-5 bayesianAE", 
+        "top-5_filter/ensembleAE": "top-5 ensembleAE",
+        "frequent_top-5_filter/mannwhitneyu":"frequent top-5 WLCX",
+        "frequent_top-5_filter/mrmr_classif":"frequent top-5 MRMR",
+        "frequent_top-5_filter/mutual_info_classif":"frequent top-5 MIM",
+        "frequent_top-5_embedded/LASSO":"frequent top-5 LASSO",
+        "frequent_top-5_wrapper/LogisticRegression": "frequent top-5 SBS+LR",
+        "frequent_top-5_wrapper/SVC": "frequent top-5 SBS+L-SVM",
+        "frequent_top-5_wrapper/RandomForestClassifier": "frequent top-5 SBS+RF",
+        "frequent_top-5_wrapper/MLPClassifier": "frequent top-5 SBS+MLP",
+        "frequent_top-5_filter/singleAE":"frequent top-5 singleAE", 
+        "frequent_top-5_filter/bayesianAE": "frequent top-5 bayesianAE", 
+        "frequent_top-5_filter/ensembleAE": "frequent top-5 ensembleAE"
+
+    }
+
+pearson_corr_df = corr_dfs["pearson"].rename(index=label_mapping, columns=label_mapping)
+spearman_corr_df = corr_dfs["spearman"].rename(index=label_mapping, columns=label_mapping)
+
+fig, axes = plt.subplots(1, 2, figsize=(40, 16))
+
+# Define a beautiful colormap
+cmap = sns.diverging_palette(220, 10, as_cmap=True)
+
+ax1 = axes[0]
+hm1 = sns.heatmap(
+    pearson_corr_df, cmap=cmap, square=True, linewidth=0.5, cbar=False, 
+    vmin=0, vmax=1, annot = True, fmt=".2f", annot_kws={"size":10}, ax=ax1 #cbar_kws={'shrink': 0.75}, 
+)
+ax1.set_title("Pearson Correlation")
+
+# --- Right: Spearman ---
+ax2 = axes[1]
+hm2 = sns.heatmap(
+    spearman_corr_df, cmap=cmap, square=True, linewidth=0.5, cbar=False, 
+    vmin=0, vmax=1, annot = True, fmt=".2f", annot_kws={"size":10}, ax=ax2
+)
+
+cbar = fig.colorbar(hm2.collections[0], ax=ax2, shrink=0.75, location='right')
+
+ax2.set_title("Spearman Correlation")
+
+plt.tight_layout()
+
+plt.savefig(os.path.join(OUT_DIR, f"combined_top-5_vs_frequent_corr_plot.tif"), format="tiff", dpi=600)
+
+plt.show()
+        
+
+
+        
 
 #%%
 ## Comparing stability of best performing FS method from each family with best AE-FS method using Wilcoxon Signed Rank Test
