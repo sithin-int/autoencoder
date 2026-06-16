@@ -86,6 +86,88 @@ for fs_method in ["random"] + FS_METHODS:
     display(mean_stability_df.xs(fs_method, level="fs_method"))
     print("\n")
 
+
+
+#%%
+## Comparing stability of FS methods using Wilcoxon Signed Rank Test
+from scipy import stats
+
+import itertools
+
+
+def compare_fs_methods(fs_methods, stability_df, top_k, similarity_measure='spearman'):
+    
+    df = pd.DataFrame(np.zeros((len(fs_methods), len(fs_methods))), index=fs_methods, columns=fs_methods)
+    
+    pairs = list(itertools.product(fs_methods, repeat=2))
+    
+    for fs_method1, fs_method2 in pairs:
+
+        stability_values1 = stability_df[(stability_df.fs_method == fs_method1) & (stability_df.top_k == top_k) & (stability_df.similarity_measure == similarity_measure)].sort_values(by="perturb_idx").reset_index(drop=True).estimate.to_list()
+        stability_values2 = stability_df[(stability_df.fs_method == fs_method2) & (stability_df.top_k == top_k) & (stability_df.similarity_measure == similarity_measure)].sort_values(by="perturb_idx").reset_index(drop=True).estimate.to_list()
+
+        differences = np.array(stability_values1) - np.array(stability_values2)
+        if np.all(differences == 0):
+            print("Arrays are identical. Wilcoxon test is undefined.")
+            df.loc[fs_method1, fs_method2] = 1.0
+        else:
+            df.loc[fs_method1, fs_method2] = stats.wilcoxon(stability_values1, stability_values2).pvalue
+
+    return df
+
+
+for simlarity_measure in ["global_spearman", "kuncheva", "mwm"]:
+
+    k = -1 if simlarity_measure == "global_spearman" else 5
+    
+    wilcoxon_df = compare_fs_methods(FS_METHODS, stability_df, top_k=k, similarity_measure=simlarity_measure)
+
+    label_mapping = {
+        "filter/mannwhitneyu":"WLCX",
+        "filter/mrmr_classif":"MRMR",
+        "filter/mutual_info_classif":"MIM",
+        "embedded/LASSO":"LASSO",
+        "wrapper/LogisticRegression": "SBS+LR",
+        "wrapper/SVC": "SBS+L-SVM",
+        "wrapper/RandomForestClassifier": "SBS+RF",
+        "wrapper/MLPClassifier": "SBS+MLP",
+        "filter/singleAE":"singleAE", 
+        "filter/bayesianAE": "bayesianAE", 
+        "filter/ensembleAE": "ensembleAE"
+    }
+
+    wilcoxon_df = wilcoxon_df.rename(index=label_mapping, columns=label_mapping)
+
+    fig, axes = plt.subplots(1, 1, figsize=(20, 8))
+
+    # Define a beautiful colormap
+    cmap = sns.diverging_palette(220, 10, as_cmap=True)
+
+    hm = sns.heatmap(
+        wilcoxon_df, cmap=cmap, square=True, linewidth=0.5, cbar=False, 
+        vmin=0, vmax=1, annot = True, fmt=".2f", annot_kws={"size":10}, ax=axes #cbar_kws={'shrink': 0.75}, 
+    )
+
+    for text in hm.texts:
+        # Read the text value cast it to float
+        val = float(text.get_text())
+        if val > 0.05:
+            text.set_weight('bold')
+            text.set_color('black')
+            text.set_size(12)      # Make it slightly larger to stand out
+    # ---------------------------------------
+
+    axes.set_title(f"Wilcoxon Signed Rank Test ({simlarity_measure})")
+
+    cbar = fig.colorbar(hm.collections[0], ax=axes, shrink=0.75, location='right')
+
+    plt.tight_layout()
+
+    plt.savefig(os.path.join(OUT_DIR, f"wilcoxon_{simlarity_measure}.tif"), format="tiff", dpi=600)
+
+    plt.show()
+
+
 #%%
 # Deep dive in LASSO feature selection
 stability_df = pd.read_csv(os.path.join(OUT_DIR, 'stability.csv'))
@@ -326,7 +408,7 @@ coef_order = ["all", "non-zero", "zero"]
 
 mim_df_plot = pd.DataFrame(mim_df)
 coef_label_map = {"all": "All", "non-zero": "Non-Zero", "zero": "Zero"}
-lasso_df_plot["coef_label"] = lasso_df_plot["coef"].map(coef_label_map)
+mim_df_plot["coef_label"] = mim_df_plot["coef"].map(coef_label_map)
 coef_label_order = ["All", "Non-Zero", "Zero"]
 
 fig, (ax_bar, ax_dist) = plt.subplots(1, 2, figsize=(13, 5))
@@ -335,8 +417,8 @@ fig, (ax_bar, ax_dist) = plt.subplots(1, 2, figsize=(13, 5))
 width = 0.3
 offsets = [-width / 2, width / 2]
 group_vals_combined = {
-    "All Features":    [(lasso_df_agg.loc[c, "f1_count"] + lasso_df_agg.loc[c, "f2_count"]) / 2 for c in coef_order],
-    "Overlapped Features": [lasso_df_agg.loc[c, "overlap_count"] for c in coef_order],
+    "All Features":    [(mim_df_agg.loc[c, "f1_count"] + mim_df_agg.loc[c, "f2_count"]) / 2 for c in coef_order],
+    "Overlapped Features": [mim_df_agg.loc[c, "overlap_count"] for c in coef_order],
 }
 x = np.arange(len(coef_order))
 bar_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -361,17 +443,17 @@ sns.despine(ax=ax_bar)
 
 # --- Right: Stability estimate distribution per coef filter ---
 sns.violinplot(
-    data=lasso_df_plot, x="coef_label", y="estimate",
+    data=mim_df_plot, x="coef_label", y="estimate",
     order=coef_label_order, inner=None, cut=0,
     linewidth=1, density_norm="width", alpha=0.5, ax=ax_dist
 )
 sns.stripplot(
-    data=lasso_df_plot, x="coef_label", y="estimate",
+    data=mim_df_plot, x="coef_label", y="estimate",
     order=coef_label_order, color="black", alpha=0.15,
     size=2.5, jitter=0.12, ax=ax_dist, zorder=2
 )
 # Mean marker: diamond per group, drawn on top
-means = lasso_df_plot.groupby("coef_label")["estimate"].mean()
+means = mim_df_plot.groupby("coef_label")["estimate"].mean()
 for i, coef_label in enumerate(coef_label_order):
     ax_dist.scatter(i, means[coef_label], marker="D", color="white",
                     edgecolors="black", linewidths=1.5,
@@ -722,6 +804,68 @@ for fs_method in FS_METHODS:
     print("\n")
 
 
+from MLstatkit import Delong_test
+import itertools
+
+
+def compare_performance(fs_methods, results_df):
+    
+    df = pd.DataFrame(np.zeros((len(fs_methods), len(fs_methods))), index=fs_methods, columns=fs_methods)
+    
+    pairs = list(itertools.product(fs_methods, repeat=2))
+    
+    for fs_method1, fs_method2 in pairs:
+
+        predictions1 = results_df[(results_df.fs_method == fs_method1)].sort_values(by="perturb_idx").reset_index(drop=True).predictions.to_list()
+        predictions2 = results_df[(results_df.fs_method == fs_method2)].sort_values(by="perturb_idx").reset_index(drop=True).predictions.to_list()
+        targets = results_df[(results_df.fs_method == fs_method1)].sort_values(by="perturb_idx").reset_index(drop=True).targets.to_list()
+
+        differences = np.array(predictions1) - np.array(predictions2)
+        if np.all(differences == 0):
+            p = 1
+        else:
+            _, p = Delong_test(targets, predictions1, predictions2, return_ci=False, return_auc=False, verbose=0)
+
+        
+        df.loc[fs_method1, fs_method2] = p
+
+    return df
+
+# Test the performance of the feature selection methods
+delonge_df = compare_performance(FS_METHODS, results_df)
+delonge_df.to_csv(os.path.join(OUT_DIR, 'delong_test.csv'), index=False)
+
+delonge_df = delonge_df.rename(index=label_mapping, columns=label_mapping)
+
+fig, axes = plt.subplots(1, 1, figsize=(20, 8))
+
+# Define a beautiful colormap
+cmap = sns.diverging_palette(220, 10, as_cmap=True)
+
+hm = sns.heatmap(
+    delonge_df, cmap=cmap, square=True, linewidth=0.5, cbar=False, 
+    vmin=0, vmax=1, annot = True, fmt=".2f", annot_kws={"size":10}, ax=axes #cbar_kws={'shrink': 0.75}, 
+)
+
+for text in hm.texts:
+    # Read the text value cast it to float
+    val = float(text.get_text())
+    if val > 0.05:
+        text.set_weight('bold')
+        text.set_color('black')
+        text.set_size(12)      # Make it slightly larger to stand out
+# ---------------------------------------
+
+axes.set_title(f"Delong")
+
+cbar = fig.colorbar(hm.collections[0], ax=axes, shrink=0.75, location='right')
+
+plt.tight_layout()
+
+plt.savefig(os.path.join(OUT_DIR, f"delong_test.tif"), format="tiff", dpi=600)
+
+
+plt.show()
 
 
 #%%
@@ -803,6 +947,25 @@ plt.savefig(os.path.join(OUT_DIR, "signatures.tif"), format="tiff", dpi=600)
 
 plt.show()
 
+#%%
+## Comparing stability of best performing FS method from each family with best AE-FS method using Wilcoxon Signed Rank Test
+from scipy import stats
+
+
+
+
+# for fs_method1 in FS_METHODS:
+#     for fs_method2 in FS_METHODS:
+#         for similariy_measure in SIMILARITY_METHODS:
+
+#             x = stability_df[(stability_df.fs_method==fs_method1) & (stability_df.top_k==5) & (stability_df.similarity_measure==similariy_measure)]
+#             y = stability_df[(stability_df.fs_method==fs_method2) & (stability_df.top_k==5) & (stability_df.similarity_measure==similariy_measure)]
+#             display(x)
+
+
+#             break;
+#         break;
+#     break;
 
 #%%
 # Identifying the top-5 frequent features
@@ -1124,23 +1287,7 @@ plt.show()
 
         
 
-#%%
-## Comparing stability of best performing FS method from each family with best AE-FS method using Wilcoxon Signed Rank Test
-from scipy import stats
 
-
-# for fs_method1 in FS_METHODS:
-#     for fs_method2 in FS_METHODS:
-#         for similariy_measure in SIMILARITY_METHODS:
-
-#             x = stability_df[(stability_df.fs_method==fs_method1) & (stability_df.top_k==5) & (stability_df.similarity_measure==similariy_measure)]
-#             y = stability_df[(stability_df.fs_method==fs_method2) & (stability_df.top_k==5) & (stability_df.similarity_measure==similariy_measure)]
-#             display(x)
-
-
-#             break;
-#         break;
-#     break;
 
         
         
