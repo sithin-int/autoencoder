@@ -8,10 +8,10 @@ TBA
 ### **Repository structure**
 #### **Overview:**
 
-* Feature Selection Using SBS vs. AE Variants
+* Feature Selection Using Classical Methods (Filter, Embedded, Wrapper) vs. AE Variants
 * AE Pytorch Utilities
 * Feature Selection Stability Analysis
-* Time and Space Cost Analysis 
+* Computational Cost Analysis 
 * Visualizations
 * Sanity Checks
 * Python Scripts
