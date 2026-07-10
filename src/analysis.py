@@ -1284,11 +1284,131 @@ plt.savefig(os.path.join(OUT_DIR, f"combined_top-5_vs_frequent_corr_plot.tif"), 
 plt.show()
         
 
+#%%
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from sklearn.datasets import make_moons
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.inspection import DecisionBoundaryDisplay
 
+
+# 1. Generate the dummy data (crescent moons with some noise)
+X, y = make_moons(n_samples=200, noise=0.20, random_state=42)
+
+# 2. Define the 4 classifiers
+classifiers = {
+    "LR": LogisticRegression(),
+    "L-SVM": SVC(kernel="linear", C=1.0),
+    "RF": RandomForestClassifier(n_estimators=10, max_depth=5, random_state=42),
+    "MLP": MLPClassifier(
+        hidden_layer_sizes=(100, 100), 
+        activation='relu', 
+        max_iter=2000, 
+        random_state=42
+    )
+}
+
+# 3. Set up a side-by-side plot comparison in a 2x2 grid
+fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+
+for ax, (name, clf) in zip(axes.ravel(), classifiers.items()):
+    # Train the classifier
+    clf.fit(X, y)
+
+    ax.patch.set_visible(False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    rounded_box = mpatches.FancyBboxPatch(
+        (0, 0), 1, 1, 
+        boxstyle="round,pad=0,rounding_size=0.1", # Adjust rounding_size to make it more/less curved
+        transform=ax.transAxes, 
+        facecolor="#EBEBEB", # The light grey color matching your image
+        edgecolor="none", 
+        zorder=-10
+    )
+    ax.add_patch(rounded_box)
+    
+    # Determine the response method to find the exact middle of the boundary
+    if hasattr(clf, "decision_function"):
+        response_method = "decision_function"
+        boundary_level = [0]             
+    else:
+        response_method = "predict_proba"
+        boundary_level = [0.5]           
+    
+    # LAYER 1: The Solid Central Boundary Line (Gradient background removed)
+    DecisionBoundaryDisplay.from_estimator(
+        clf, 
+        X, 
+        response_method=response_method,
+        plot_method="contour",
+        levels=boundary_level,
+        colors='#707070', #'#083050',    # Dark blue line
+        linewidths=3,
+        ax=ax,
+        eps=0.5
+    )
+
+    if name == "L-SVM":
+        # Draw the margin lines at -1 and 1
+        DecisionBoundaryDisplay.from_estimator(
+            clf, 
+            X, 
+            response_method="decision_function",
+            plot_method="contour",
+            levels=[-1, 1],
+            colors='#707070', #'#083050',
+            linestyles=['--'],  
+            linewidths=1.5,
+            alpha=0.7,
+            ax=ax,
+            eps=0.5
+        )
         
-
-
-
+        # Get all mathematical support vectors and their distances to the boundary
+        sv = clf.support_vectors_
+        sv_distances = clf.decision_function(sv)
         
+        # FILTER: Only keep the support vectors sitting on the margin lines 
+        # (Absolute distance roughly equal to 1, with a small tolerance for the math)
+        edge_sv = sv[np.isclose(np.abs(sv_distances), 1.0, atol=0.15)]
         
+        # Highlight ONLY the edge support vectors
+        ax.scatter(edge_sv[:, 0], edge_sv[:, 1], s=120, 
+                   linewidth=1.5, facecolors='none', edgecolors='k', 
+                   label='Support Vectors')
+        ax.legend(loc="lower left")
+    
+    # LAYER 2: Plot the data points (Class 0 as Red, Class 1 as Blue)
+    ax.scatter(X[y == 0, 0], X[y == 0, 1], c="#EBEBEB", edgecolors='k', marker='s', s=30)
+    ax.scatter(X[y == 1, 0], X[y == 1, 1], c="#EBEBEB", edgecolors='k', marker='o', s=30)
+    
+    # Clean up the styling
+    # ax.set_title(name, fontsize=16, fontweight='bold', pad=15)
 
+    
+    # Make the border lines clean
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.5)
+
+# Add a legend to just the first subplot to avoid clutter
+# axes[0,0].legend(loc="lower left", framealpha=0.9)
+
+plt.tight_layout(w_pad=4.0, h_pad=4.0)
+
+# Save the combined figure safely using os.path.join
+filepath = os.path.join(OUT_DIR, "decision_boundary_lines_only.png")
+plt.savefig(filepath, dpi=300, bbox_inches='tight')
+print(f"Image saved successfully as '{filepath}'")
+
+# Display it if running in a notebook or IDE
+plt.show()
