@@ -1,6 +1,8 @@
 # Exploring Self-supervised Deep Sparse Autoencoders for Robust Feature Selection in Radiomics Analysis
 Repository supporting the article submitted to Scientific Reports
 
+[![DOI](https://zenodo.org/badge/784240373.svg)](https://doi.org/10.5281/zenodo.21292935)
+
 If you use this codebase for your research, please cite our paper if available; otherwise, please cite this repository:
 ```bibtex
 TBA
