@@ -5,7 +5,7 @@ Repository supporting the article submitted to Scientific Reports
 
 If you use this codebase for your research, please cite our paper if available; otherwise, please cite this repository:
 ```bibtex
-TBA
+Thulasi Seetha, S., Messina, A., Casale, A. et al. Exploring self-supervised deep sparse autoencoders for robust feature selection in radiomics analysis. Sci Rep (2026). https://doi.org/10.1038/s41598-026-62420-7
 ```
 ### **Repository structure**
 #### **Overview:**
